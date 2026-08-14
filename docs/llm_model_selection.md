@@ -13,11 +13,20 @@ Ghi lại những gì đã thử và tại sao, để không phải dò lại.
 
 ## Kết quả đo (tools/eval_chat.py)
 
-| Model | Chính xác cử chỉ | Lỗi quy tắc | Độ trễ (median) |
-|---|---|---|---|
-| Qwen2.5-3B-Instruct | gần như chọn bừa (định tính) | nhiều | ~0.9s |
-| Qwen3-4B-Instruct-2507 | 94% (45/48, bộ 24 câu) | 2/48 | 1.2s |
-| Qwen3-4B-Instruct-2507 | **95%** (82/86, bộ 43 câu) | 3/86 | 1.2s |
+| Model | Bộ test | Chính xác cử chỉ | Lỗi quy tắc | Độ trễ |
+|---|---|---|---|---|
+| Qwen2.5-3B-Instruct | - | gần như chọn bừa (định tính) | nhiều | ~0.9s |
+| Qwen3-4B-Instruct-2507 | 24 câu | 94% (45/48) | 2/48 | 1.2s |
+| Qwen3-4B-Instruct-2507 | 43 câu | 95% (82/86) | 3/86 | 1.2s |
+| Qwen3.5-4B | 43 câu | 91% (78/86) | 1/86 | 1.7s |
+| Qwen3-4B-Instruct-2507 + routing | 86 câu | 90% (154/172) | 5/172 | 1.2s |
+| **cùng trên, sau khi sửa** | **86 câu** | **93%** (160/172) | **1/172** | **1.1s** |
+
+Hai dòng cuối cho thấy việc thêm nhánh routing sang MolmoAct2 ban đầu làm tụt độ
+chính xác (95%→90%) và tăng lỗi quy tắc, vì model trở nên quá "nhiệt tình" - nói
+như đã nhặt xong, và sinh cả task không phải gắp-đặt. Thêm quy tắc phải nói ở thể
+sắp làm, phải thừa nhận không nhìn thấy gì, cộng với việc server tự chặn task sai
+dạng, đưa lên 93% và lỗi quy tắc xuống còn 1/172.
 
 Đáng chú ý: cả 4 lần "sai" ở bộ 43 câu đều là cử chỉ **khớp với chính câu trả
 lời model vừa viết** - ví dụ *"Sẽ quơ quơ vui hơn, nhưng vẫn không thể cầm đồ
@@ -65,14 +74,22 @@ mạnh sinh ra các cặp `câu người dùng → câu trả lời playful + c�
 
 ## Lượng tử hóa INT4 - đo trước khi tin
 
-Giả thiết "INT4 thì nhanh hơn" **không đúng cho trường hợp này**, hoặc ít nhất
-không hiển nhiên: ở batch 1 trên GPU rời, trọng số nhỏ đi giúp đỡ VRAM nhưng mỗi
-token phải giải nén thêm, nên độ trễ thường **tăng**. INT4 chỉ thắng khi thật sự
-bị giới hạn băng thông bộ nhớ - với model 4B trên 4090 thì không phải vậy.
+**Đã đo, và INT4 làm CHẬM hơn** (`tools/bench_int4.py`, Qwen3-4B-Instruct-2507
+trên chính máy 4090 này):
 
-`tools/bench_int4.py` đo cả hai (bf16 vs bitsandbytes NF4) trên đúng máy này:
-VRAM, thời gian nạp, tok/s, và in ra câu trả lời để kiểm tra chất lượng không
-tụt. Chạy nó rồi hãy quyết định, đừng đổi vì cảm giác.
+| | median | tok/s | VRAM |
+|---|---|---|---|
+| bf16 | **0.83s** | **29.3** | 8.0 GB |
+| bitsandbytes NF4 | 1.12s | 20.8 | **2.7 GB** |
+
+NF4 **chậm hơn 35%**, đổi lại tiết kiệm 5.4GB VRAM. Đúng như lý thuyết: ở batch 1
+trên GPU rời, trọng số nhỏ đi giúp đỡ VRAM nhưng mỗi token phải giải nén thêm nên
+độ trễ tăng. INT4 chỉ thắng khi thật sự bị giới hạn băng thông bộ nhớ - model 4B
+trên 4090 thì không phải vậy.
+
+Kết luận: **không lượng tử hóa model 4B này**. VRAM đang đủ (20.9/24.5GB kể cả
+MolmoAct2), mà độ trễ thì quan trọng - cử chỉ `thinking` chỉ lấp được vài giây.
+Lượng tử hóa chỉ đáng xét khi muốn nhét model **lớn hơn** vào cùng ngân sách.
 
 `bitsandbytes` cài được an toàn vào `molmoact2-env` (wheel có sẵn binary, không
 biên dịch, đã xác nhận transformers vẫn import bình thường sau khi cài) - khác

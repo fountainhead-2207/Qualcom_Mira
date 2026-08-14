@@ -117,8 +117,11 @@ CASES = [
 
     # ---------- scan: đang tìm, quan sát ----------
     ("scan", "mira ơi nhìn quanh xem có gì lạ không", {"scan", "curious_tilt", "shrug"}),
-    ("scan", "mira tìm giúp tôi cái tua vít với", {"scan", "point", "shrug",
-                                                  "curious_tilt", "nod", "none"}),
+    # "tìm giúp tôi cái X" thuộc nhóm manipulation, không phải scan: nhờ một cánh
+    # tay robot tìm hộ đồ thì nhặt lên mới là việc có ích. Ban đầu bị xếp vào scan
+    # nên bị tính là "rò task" oan.
+    ("manipulation", "mira tìm giúp tôi cái tua vít với",
+     {"scan", "point", "nod", "curious_tilt", "none"}),
     ("scan", "mira quét một vòng coi", {"scan", "curious_tilt", "shrug"}),
 
     # ---------- play-dead: làm trò ----------
