@@ -73,24 +73,55 @@ def generate_reply(heard_text):
     text = tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
 
     match = re.search(r"\{.*\}", text, re.DOTALL)
+    # Fallback text (used whenever the model doesn't give a clean {"reply":
+    # ...} JSON) must never include the raw JSON braces - that gets spoken
+    # aloud verbatim by the TTS otherwise. Strip that portion out first.
+    prose = text[: match.start()].strip() if match else text.strip()
     if not match:
-        return text.strip(), "none"
+        return (prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), "none"
     try:
         obj = json.loads(match.group(0))
     except json.JSONDecodeError:
-        return text.strip(), "none"
+        return (prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), "none"
     reply = obj.get("reply", "").strip()
     motion = obj.get("motion", "none").strip()
     if motion not in EXISTING_MOTIONS + PROPOSED_MOTIONS:
         motion = "none"
-    return reply or text.strip(), motion
+    return (reply or prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), motion
+
+
+TRAIL_SILENCE_S = 0.3
 
 
 def synthesize(text):
+    # "Mira" written plainly gets phonemized with English phones (schwa + ɹ)
+    # that this Vietnamese acoustic model never saw in training, and it
+    # improvises something close to the real word "mỉa" instead. Splitting
+    # into two space-separated words forces espeak to read it as the plain
+    # Vietnamese syllables "mi" + "ra" the model actually knows - confirmed by
+    # comparing EspeakPhonemizer's output for both spellings before making
+    # this change. A space reads at a natural pace; a hyphen produces the
+    # same phonemes but the duration model rushes it, like a single word.
+    speakable = re.sub(r"\bmira\b", "Mi ra", text, flags=re.IGNORECASE)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
-        voice.synthesize_wav(text, wf)
-    return buf.getvalue()
+        voice.synthesize_wav(speakable, wf)
+
+    # A2DP playback pops audibly at the very end of the clip - classic ALSA
+    # buffer-underrun-on-drain artifact when the PCM stream stops right as
+    # the last real samples are consumed. Padding with trailing silence gives
+    # the Bluetooth link something harmless to drain instead.
+    buf.seek(0)
+    with wave.open(buf, "rb") as wf:
+        params = wf.getparams()
+        frames = wf.readframes(wf.getnframes())
+    pad_frames = int(TRAIL_SILENCE_S * params.framerate)
+    frames += b"\x00" * (pad_frames * params.nchannels * params.sampwidth)
+    out = io.BytesIO()
+    with wave.open(out, "wb") as wf:
+        wf.setparams(params)
+        wf.writeframes(frames)
+    return out.getvalue()
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -41,12 +41,25 @@ from scipy.signal import resample_poly
 import sherpa_onnx
 from prometheus_client import Gauge, Counter, start_http_server
 
-# mira_chat_server.py on the RTX 4090, reached through an SSH tunnel the board
-# opens to itself (`ssh -N -L 8766:localhost:8766 61.28.228.23`, matching the
-# pattern the Windows PC already uses for the MolmoAct2 tunnel) - not yet
-# auto-started, see docs/uno-q-board.md for the one-time key setup this needs.
-CHAT_SERVER_URL = "http://127.0.0.1:8766/chat"
+# mira_chat_server.py on the RTX 4090. The board's own network blocks outbound
+# SSH (port 234, and even port 22) to anywhere but port 443, so it can't tunnel
+# there directly - reached instead through the Windows PC on the same LAN,
+# which already has SSH access and opens `ssh -N -L 0.0.0.0:8766:localhost:8766
+# 61.28.228.23` (bound to all interfaces, not just localhost, specifically so
+# the board can reach it).
+CHAT_SERVER_URL = "http://192.168.1.32:8766/chat"
 CHAT_TIMEOUT_S = 8
+
+# JBL Go 4 speaker, paired via `bluealsa` (bluez-alsa-utils) - PipeWire/
+# WirePlumber never registered an A2DP sink profile with bluetoothd on this
+# board (bluetoothd's own log: "a2dp-sink profile connect failed... Protocol
+# not available") even with Experimental mode on and a fresh re-pair;
+# bluealsa did immediately. PipeWire is now stopped/masked entirely to avoid
+# it competing with bluealsa for the audio hardware. The `plug:` wrapper
+# auto-converts Piper's 22050Hz mono output to the link's 48kHz stereo -
+# no manual resampling needed.
+BT_SPEAKER_MAC = "4C:3C:8F:3C:42:EE"
+BT_APLAY_DEVICE = f"plug:'bluealsa:DEV={BT_SPEAKER_MAC},PROFILE=a2dp'"
 
 METRICS_PORT = 9103
 AUDIO_RMS = Gauge("board_audio_rms", "RMS of the most recent audio hop")
@@ -176,6 +189,9 @@ def heard_wake_word(text):
     return False
 
 
+chat_busy = threading.Event()
+
+
 def chat_and_speak(heard_text):
     """Ask mira_chat_server.py for a reply + gesture, play the reply out loud,
     and run the gesture if one was picked and already exists as a real motion
@@ -191,15 +207,14 @@ def chat_and_speak(heard_text):
     except Exception as e:
         print(f"  chat server unreachable ({e}) - skipping", flush=True)
         return
+    finally:
+        chat_busy.clear()
 
     print(f"  Mira: {result['reply_text']}", flush=True)
     wav_bytes = base64.b64decode(result["audio_wav_base64"])
     wav_path = DEBUG_DIR / "chat_reply.wav"
     wav_path.write_bytes(wav_bytes)
-    # paplay (PipeWire's PulseAudio-compatible client) routes to whatever the
-    # default sink is - the board's headphone jack until a Bluetooth speaker
-    # is paired and set as default via `wpctl set-default <id>`.
-    subprocess.run(["paplay", str(wav_path)], capture_output=True)
+    subprocess.run(["aplay", "-D", BT_APLAY_DEVICE, str(wav_path)], capture_output=True)
 
     motion = result.get("motion")
     if motion and not result.get("motion_is_proposed"):
@@ -311,9 +326,12 @@ try:
             # next overlapping window.
             rolling.clear()
             last_text = ""
+        elif chat_busy.is_set():
+            print("  already waiting on a chat reply - ignoring", flush=True)
         else:
             RESULTS.labels(motion="chat").inc()
             save_debug_wav(window, FS)
+            chat_busy.set()
             threading.Thread(target=chat_and_speak, args=(text,), daemon=True).start()
             rolling.clear()
             last_text = ""
