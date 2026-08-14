@@ -270,7 +270,7 @@ with sd.InputStream(samplerate=DEVICE_FS, channels=1, dtype="int16", blocksize=D
                 subprocess.run(
                     ["ssh", "-i", "C:/Users/LENOVO/.ssh/id_ed25519_unoq",
                      "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
-                     "arduino@192.168.1.41", "mira-robot replay play-dead --yes"],
+                     "arduino@192.168.1.41", "mira-robot replay rest --yes"],
                     capture_output=True, text=True, timeout=45,
                 )
                 oww.reset()

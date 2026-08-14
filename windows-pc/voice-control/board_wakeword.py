@@ -187,6 +187,8 @@ preroll = collections.deque(maxlen=int(1.2 * FS / FRAME) + 1)
 t_start = time.perf_counter()
 
 try:
+    _dbg_last = time.perf_counter()
+    _dbg_scores, _dbg_rms = [], []
     while time.perf_counter() - t_start < TOTAL_DURATION:
         chunk = read_frame_16k()
         if chunk is None:
@@ -195,6 +197,13 @@ try:
         preroll.append(chunk)
         score = oww.predict(chunk)[wake_key]
         WAKE_SCORE.set(score)
+        _dbg_scores.append(score)
+        _dbg_rms.append(float(np.sqrt(np.mean(chunk.astype(np.float64) ** 2))) if chunk.size else 0.0)
+        if time.perf_counter() - _dbg_last > 1.0:
+            print(f"  [debug] max_score={max(_dbg_scores):.4f} max_rms={max(_dbg_rms):.0f} frames={len(_dbg_scores)}", flush=True)
+            _dbg_scores.clear()
+            _dbg_rms.clear()
+            _dbg_last = time.perf_counter()
         t = time.perf_counter() - t_start
         if score > 0.3:
             print(f"  {t:5.2f}s  wake_score={score:.3f}", flush=True)
@@ -242,7 +251,7 @@ try:
             if matched == SLEEP:
                 COMMAND_RESULTS.labels(motion="sleep").inc()
                 print("  >>> going to sleep - playing rest pose, then stopping the listening loop", flush=True)
-                subprocess.run(["mira-robot", "replay", "play-dead", "--yes"], capture_output=True, text=True, timeout=45)
+                subprocess.run(["mira-robot", "replay", "rest", "--yes"], capture_output=True, text=True, timeout=45)
                 oww.reset()
                 break
             elif matched:

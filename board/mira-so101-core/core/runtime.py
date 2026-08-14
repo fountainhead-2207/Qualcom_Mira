@@ -44,6 +44,9 @@ MOTION_ALIASES = {
     "celebrate": "motion_celebrate",
     "curious-tilt": "motion_curious_tilt",
     "curious_tilt": "motion_curious_tilt",
+    # What "Mira ngủ" now settles into. play-dead is kept as a gesture but is
+    # a dramatic collapse, which read wrong as a way to go to sleep.
+    "rest": "motion_rest",
     # Only add a name here once its motion_<name>/ dataset actually exists -
     # mira-robot list eagerly loads every alias's dataset to show its
     # duration, so a name with no matching folder breaks the whole listing.

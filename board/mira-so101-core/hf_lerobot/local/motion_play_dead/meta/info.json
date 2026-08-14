@@ -1,18 +1,6 @@
 {
     "codebase_version": "v3.0",
-    "robot_type": "so101_follower",
-    "total_episodes": 1,
-    "total_frames": 449,
-    "total_tasks": 1,
-    "chunks_size": 1000,
-    "data_files_size_in_mb": 100,
-    "video_files_size_in_mb": 500,
     "fps": 30,
-    "splits": {
-        "train": "0:1"
-    },
-    "data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
-    "video_path": "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4",
     "features": {
         "action": {
             "dtype": "float32",
@@ -77,5 +65,17 @@
             ],
             "names": null
         }
+    },
+    "total_episodes": 1,
+    "total_frames": 450,
+    "total_tasks": 1,
+    "chunks_size": 1000,
+    "data_files_size_in_mb": 100,
+    "video_files_size_in_mb": 200,
+    "data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
+    "video_path": null,
+    "robot_type": "so_follower",
+    "splits": {
+        "train": "0:1"
     }
 }

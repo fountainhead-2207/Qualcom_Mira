@@ -353,7 +353,7 @@ try:
             RESULTS.labels(motion="sleep").inc()
             print("  >>> going to sleep - resting, then stopping", flush=True)
             save_debug_wav(window, FS)
-            subprocess.run(["mira-robot", "replay", "play-dead", "--yes"],
+            subprocess.run(["mira-robot", "replay", "rest", "--yes"],
                            capture_output=True, text=True, timeout=60)
             break
         elif matched:
