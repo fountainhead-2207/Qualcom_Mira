@@ -37,6 +37,16 @@ MOTION_ALIASES = {
     "shake": "motion_shake_no",
     "clean": "motion_cleaning",
     "scan": "motion_scan_10s",
+    "thinking": "motion_thinking",
+    # Add each of these only once its motion_<name>/ dataset actually exists -
+    # mira-robot list eagerly loads every alias's dataset to show its
+    # duration, so a name with no matching folder breaks the whole listing:
+    # "shrug": "motion_shrug",
+    # "point": "motion_point",
+    # "bow": "motion_bow",
+    # "celebrate": "motion_celebrate",
+    # "curious-tilt": "motion_curious_tilt",
+    # "curious_tilt": "motion_curious_tilt",
 }
 LOCK_PATH = Path("/tmp/mira-so101-motion.lock")
 PID_PATH = Path("/tmp/mira-so101-motion.pid")
