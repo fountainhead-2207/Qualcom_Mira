@@ -1,38 +1,38 @@
-# Recording a gesture yourself, start to finish
+# Hướng dẫn tự ghi gesture, từ đầu đến cuối
 
-Everything runs from a normal terminal on the Windows PC (Git Bash or PowerShell — commands below are Git Bash style). Do it at your own pace; nothing is timed except the 5-second recording window itself, and that only starts when you run the record command.
+Toàn bộ chạy từ terminal thường trên máy Windows (lệnh dưới viết theo kiểu Git Bash). Làm theo nhịp của bạn — không có gì bị tính thời gian trừ đúng cửa sổ ghi 5 giây, và cửa sổ đó chỉ bắt đầu khi bạn chạy lệnh ghi.
 
-Set these once per terminal session so you don't repeat them:
+Đặt sẵn mấy biến này một lần cho mỗi terminal để không phải gõ lại:
 
 ```bash
 LR="C:/Users/LENOVO/AppData/Roaming/uv/tools/lelab/Scripts"
 PY="$LR/python.exe"
 CAL="C:/Users/LENOVO/.cache/huggingface/lerobot/calibration"
-export PYTHONIOENCODING=utf-8      # required, or emoji in lerobot's logs crash the console
+export PYTHONIOENCODING=utf-8      # bắt buộc, không có thì emoji trong log của lerobot làm crash console
 ```
 
-**Before anything**: if LeLab's web UI is open and has a recording or teleop session running, stop it — it holds COM7/COM8 and the CLI can't open them (`SerialException: Access is denied`). `curl -s -X POST http://127.0.0.1:8000/stop-recording` does it, or just close LeLab.
+**Trước khi làm gì**: nếu LeLab web UI đang mở và đang có phiên record/teleop chạy, phải dừng nó — nó giữ COM7/COM8 nên CLI không mở được cổng (`SerialException: Access is denied`). Chạy `curl -s -X POST http://127.0.0.1:8000/stop-recording`, hoặc đóng hẳn LeLab.
 
 ---
 
-## Step 0 (only if a recording comes out looking dead) — check the arm reads
+## Bước 0 (chỉ khi bản ghi ra kết quả "chết", không có chuyển động) — kiểm tra tay máy có đọc được không
 
 ```bash
 cd d:/Comp/Qualcom
 $PY tools/read_arm_raw.py 45
 ```
 
-Torque gets disabled so the arm moves freely by hand. Move every joint through its range during the 45 seconds; it prints a line the moment it sees each joint move, and a summary at the end. **All six joints should report movement.** Any joint listed as `NEVER MOVED` while you were physically rotating it is a real hardware/bus problem worth chasing before recording anything else.
+Script tự tắt torque nên tay xoay tự do bằng tay. Trong 45 giây đó, xoay từng khớp qua hết tầm; script in ra ngay khi phát hiện mỗi khớp chuyển động, và in tổng kết ở cuối. **Cả 6 khớp đều phải báo có chuyển động.** Khớp nào bị liệt vào `NEVER MOVED` mà bạn thật sự đã xoay nó thì đó là lỗi phần cứng/bus thật, cần xử lý trước khi ghi tiếp.
 
-`tools/read_arm_live.py 15` is the same idea but shows both arms side by side with normalized values — useful to confirm which physical arm is on COM7 vs COM8.
+`tools/read_arm_live.py 15` cũng tương tự nhưng hiện cả 2 tay cạnh nhau kèm giá trị normalized — hữu ích để xác nhận tay nào đang ở COM7, tay nào ở COM8.
 
-Note both scripts leave torque **disabled** on exit, so the follower arm goes limp (support it if it's raised) and won't mirror the leader until you run a record/teleop command again.
+Lưu ý: cả 2 script này khi kết thúc đều **để torque ở trạng thái tắt**, nên tay follower sẽ mềm oặt (đỡ nó nếu đang giơ cao) và không mirror theo leader nữa cho tới khi bạn chạy lệnh record/teleop lần sau.
 
 ---
 
-## Step 1 — record
+## Bước 1 — ghi
 
-Replace `NAME` (used for the folder) and `TASK` (a short English description, matching how the existing motions are labeled, e.g. `"wave hello"`):
+Thay `NAME` (dùng làm tên thư mục) và `TASK` (mô tả ngắn bằng tiếng Anh, theo đúng cách các motion cũ được đặt, ví dụ `"wave hello"`):
 
 ```bash
 $PY -m lerobot.scripts.lerobot_record \
@@ -46,17 +46,17 @@ $PY -m lerobot.scripts.lerobot_record \
   --play_sounds=false --display_data=false
 ```
 
-Recording starts the moment you see `Recording episode 0` — you get exactly 5 seconds (150 frames at 30fps, matching every existing motion). **Move the LEADER arm**; the follower mirrors it and the leader's positions are what get saved. No key press needed: when the 5s elapses it saves and exits on its own.
+Việc ghi bắt đầu **ngay khi bạn thấy dòng `Recording episode 0`** — bạn có đúng 5 giây (150 frame ở 30fps, khớp với mọi motion có sẵn). **Xoay tay LEADER**; tay follower sẽ mirror theo, và chính vị trí của tay leader là thứ được lưu. Không cần bấm phím gì: hết 5 giây nó tự lưu và tự thoát.
 
-Two things worth knowing:
-- `--dataset.repo_id` **must contain a `/`** (`mira/NAME`, not just `NAME`). LeRobot splits on it internally and crashes with `not enough values to unpack` otherwise. This is also why LeLab's web UI can't be used for this — its name field silently strips the `/` as you type.
-- The saved folder gets a timestamp appended (`mira/NAME_20260815_001032`). That's expected; you rename it in step 3.
+Hai điểm cần biết:
+- `--dataset.repo_id` **bắt buộc phải có dấu `/`** (`mira/NAME`, không được chỉ `NAME`). LeRobot cắt chuỗi theo dấu đó, thiếu là crash với lỗi `not enough values to unpack`. Đây cũng là lý do không dùng được LeLab web UI cho việc này — ô nhập tên của nó tự động xóa dấu `/` khi bạn gõ.
+- Thư mục lưu ra sẽ bị thêm timestamp vào tên (`mira/NAME_20260815_001032`). Bình thường, bạn đổi tên ở bước 3.
 
-Want a longer gesture? Raise `--dataset.episode_time_s`. Keep it at 5 unless the gesture genuinely needs more, so it stays consistent with the others.
+Muốn gesture dài hơn? Tăng `--dataset.episode_time_s`. Cứ để 5 giây trừ khi gesture thật sự cần dài hơn, để đồng nhất với các cái khác.
 
 ---
 
-## Step 2 — play it back and judge it
+## Bước 2 — phát lại và tự đánh giá
 
 ```bash
 $PY -m lerobot.scripts.lerobot_replay \
@@ -66,13 +66,13 @@ $PY -m lerobot.scripts.lerobot_replay \
   --dataset.fps=30 --play_sounds=false
 ```
 
-This drives the real follower arm through what you recorded. If it doesn't look right, delete the folder and redo step 1 — nothing else has been touched yet:
+Lệnh này điều khiển tay follower thật chạy lại đúng những gì bạn vừa ghi. Nếu thấy không ổn, xóa thư mục đó rồi làm lại bước 1 — chưa có gì khác bị ảnh hưởng:
 
 ```bash
 rm -rf "C:/Users/LENOVO/.cache/huggingface/lerobot/mira/NAME_<timestamp>"
 ```
 
-A quick numeric sanity check on whether the recording actually captured motion (useful when replay looks like nothing happened):
+Cách kiểm tra nhanh bằng số xem bản ghi có thật sự bắt được chuyển động không (hữu ích khi phát lại mà thấy như không có gì xảy ra):
 
 ```bash
 "d:/Comp/Qualcom/lerobot-local-env/Scripts/python.exe" -c "
@@ -82,13 +82,13 @@ s=json.load(open(f+'/meta/stats.json'))['action']
 print('range per joint:', [round(b-a,1) for a,b in zip(s['min'],s['max'])])"
 ```
 
-For reference, the original `wave` has per-joint ranges of roughly `[31, 61, 54, 101, 15, 33]`. Ranges near zero mean nothing was captured — check step 0.
+Để so sánh: motion `wave` gốc có biên độ mỗi khớp khoảng `[31, 61, 54, 101, 15, 33]`. Nếu các số gần bằng 0 thì bản ghi không bắt được gì cả — xem lại bước 0.
 
 ---
 
-## Step 3 — normalize, rename, deploy
+## Bước 3 — chuẩn hóa, đổi tên, đẩy lên board
 
-Every gesture recorded so far came out with a small constant overshoot on `shoulder_lift` (about 1.5–2.5% past the ±100 bound the board enforces). The board refuses to even *list* a motion that's out of range (`Body joint outside normalized range`), so clip it first:
+Mọi gesture ghi được tới giờ đều bị vượt biên một chút và rất ổn định ở khớp `shoulder_lift` (khoảng 1.5–2.5% quá giới hạn ±100 mà board bắt buộc). Board từ chối **kể cả việc liệt kê** một motion vượt biên (`Body joint outside normalized range`), nên phải clip trước:
 
 ```bash
 "d:/Comp/Qualcom/lerobot-local-env/Scripts/python.exe" -c "
@@ -103,7 +103,7 @@ t=t.set_column(t.schema.get_field_index('action'),'action',
 pq.write_table(t,p); print(f)"
 ```
 
-Then rename to the `motion_` convention and copy to the board:
+Rồi đổi tên theo quy ước `motion_` và copy sang board:
 
 ```bash
 mv "C:/Users/LENOVO/.cache/huggingface/lerobot/mira/NAME_<timestamp>" \
@@ -114,30 +114,30 @@ scp -i C:/Users/LENOVO/.ssh/id_ed25519_unoq -r \
   arduino@192.168.1.41:/home/arduino/.cache/huggingface/lerobot/local/
 ```
 
-`/home/arduino/.cache/huggingface/lerobot/local/` is the path that actually matters — `~/mira-so101-uno-q-core/hf_lerobot/local/` is just the original install bundle and changing it has no effect on what runs.
+`/home/arduino/.cache/huggingface/lerobot/local/` mới là đường dẫn có tác dụng thật — `~/mira-so101-uno-q-core/hf_lerobot/local/` chỉ là bundle cài đặt gốc, sửa ở đó không ảnh hưởng gì đến cái đang chạy.
 
 ---
 
-## Step 4 — register the name on the board
+## Bước 4 — đăng ký tên trên board
 
-`mira-robot` resolves names from a hardcoded table, so a new folder isn't visible until you add it. Edit `/home/arduino/.local/share/mira-so101/runtime.py` and add a line to `MOTION_ALIASES`:
+`mira-robot` tra tên từ một bảng cứng trong code, nên thư mục mới sẽ không được nhận diện cho tới khi bạn thêm vào. Sửa file `/home/arduino/.local/share/mira-so101/runtime.py`, thêm một dòng vào `MOTION_ALIASES`:
 
 ```python
 "NAME": "motion_NAME",
 ```
 
-Only add names whose folder actually exists — `mira-robot list` loads every alias's dataset up front to show its duration, so one missing folder breaks the entire listing.
+Chỉ thêm những tên mà thư mục đã thật sự tồn tại — `mira-robot list` load dataset của **mọi** alias ngay từ đầu để hiện thời lượng, nên một tên thiếu thư mục sẽ làm hỏng toàn bộ danh sách.
 
-Then verify and try it on the arm (needs the arms plugged into the board, not Windows):
+Sau đó kiểm tra và thử trên tay máy thật (cần tay cắm vào board, không phải vào Windows):
 
 ```bash
 ssh -i C:/Users/LENOVO/.ssh/id_ed25519_unoq arduino@192.168.1.41 "mira-robot list"
 ssh -i C:/Users/LENOVO/.ssh/id_ed25519_unoq arduino@192.168.1.41 "mira-robot replay NAME --yes"
 ```
 
-## Step 5 — let Mira actually choose it
+## Bước 5 — cho Mira tự chọn được cử chỉ đó
 
-For the conversational layer to pair the gesture with a reply, move the name from `PROPOSED_MOTIONS` to `EXISTING_MOTIONS` in `voice-control/mira_chat_server.py`, then redeploy and restart it on the GPU box:
+Để lớp hội thoại ghép cử chỉ này với câu trả lời, chuyển tên đó từ `PROPOSED_MOTIONS` sang `EXISTING_MOTIONS` trong `voice-control/mira_chat_server.py`, rồi deploy lại và restart trên máy GPU:
 
 ```bash
 scp voice-control/mira_chat_server.py 61.28.228.23:/data/qualcom-robotic/
@@ -146,10 +146,12 @@ ssh 61.28.228.23 "tmux kill-session -t mira_chat 2>/dev/null; \
   molmoact2-env/bin/python -u mira_chat_server.py > mira_chat_server.log 2>&1'"
 ```
 
-(tmux, not `nohup` — that box kills bare background processes when the SSH session ends.)
+(dùng tmux, không dùng `nohup` — máy đó kill process nền khi phiên SSH đóng.)
 
 ---
 
-## Still to record
+## Còn phải ghi
 
-`point`, `bow`, `celebrate`, `curious_tilt` — see `gesture_proposals.md` for what each is meant to look like and why. Already done: `thinking`, `shrug`, plus `nod` re-recorded under the current calibration.
+`point`, `bow`, `celebrate`, `curious_tilt` — xem `gesture_proposals.md` để biết mỗi cái nên trông như thế nào và tại sao cần nó. Đã xong: `thinking`, `shrug`, cùng với `nod` đã ghi lại theo calibration hiện tại.
+
+**Lưu ý**: 2 bản `thinking` và `shrug` ghi trước đó gần như không có chuyển động thật (do lệch thời gian giữa lúc báo và lúc thao tác), nên nên ghi lại cả 2 theo hướng dẫn này.
