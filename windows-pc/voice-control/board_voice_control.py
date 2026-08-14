@@ -247,6 +247,20 @@ def chat_and_speak(heard_text):
 
     if result is None:
         return
+
+    # A manipulation request ("nhặt cái tua vít lên giúp mình") comes back with a
+    # task string for MolmoAct2 rather than a canned gesture. It is deliberately
+    # NOT executed: MolmoAct2 needs both cameras and the wrist one is dead
+    # hardware, so the policy would be acting on a gray placeholder frame - see
+    # docs/uno-q-board.md. Logged here so the routing can be verified end to end
+    # now, and swapped for a real call once the camera is replaced.
+    task = result.get("task")
+    if task:
+        RESULTS.labels(motion="molmoact2_task").inc()
+        print(f"  >>> would hand to MolmoAct2: {task!r}", flush=True)
+        print("      (not executed - wrist camera is broken, so the policy has "
+              "no second view; see docs/uno-q-board.md)", flush=True)
+
     motion = result.get("motion")
     if motion and not result.get("motion_is_proposed"):
         run_command(motion)

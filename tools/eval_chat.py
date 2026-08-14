@@ -28,67 +28,7 @@ import re
 import time
 import urllib.request
 
-# (category, prompt, acceptable gestures). "none" is accepted where no gesture
-# is clearly better than a wrong one.
-CASES = [
-    ("greeting", "chào mira", {"wave"}),
-    ("greeting", "mira ơi dậy chưa", {"wave", "nod", "curious_tilt"}),
-    ("farewell", "thôi mira nhé tôi đi ngủ", {"bow", "wave"}),
-    ("farewell", "tạm biệt mira hẹn mai gặp lại", {"bow", "wave"}),
-    ("good news", "mira ơi tôi vừa được nhận vào làm intern", {"celebrate", "dance"}),
-    ("good news", "tôi vừa thi đậu rồi mira ơi", {"celebrate", "dance"}),
-    ("good news", "mira ơi tôi mới được tăng lương", {"celebrate", "dance"}),
-    ("unknowable", "mira có biết ngày mai trời mưa không", {"shrug", "curious_tilt"}),
-    ("unknowable", "mira biết giá bitcoin bao nhiêu không", {"shrug", "curious_tilt"}),
-    ("unknowable", "mira ơi tôi nên chọn công ty nào", {"shrug", "curious_tilt", "nod", "none"}),
-    ("question back", "mira biết cái này là gì không", {"curious_tilt", "shrug", "point"}),
-    ("question back", "mira thấy cái kia lạ không", {"curious_tilt", "point"}),
-    ("about itself", "mira ơi bạn tên gì", {"wave", "bow", "nod", "none"}),
-    # shrug belongs here: it answers this by making light of how little it can
-    # do ("chỉ quơ quơ được thôi"), which is exactly a shrug.
-    ("about itself", "mira bạn làm được gì", {"wave", "dance", "nod", "scan", "shrug", "none"}),
-    ("about itself", "mira ơi bạn có buồn không", {"shake", "nod", "curious_tilt"}),
-    ("comfort", "mira ơi hôm nay tôi mệt quá", {"nod", "bow", "curious_tilt"}),
-    ("comfort", "tôi buồn quá mira à", {"nod", "bow", "curious_tilt"}),
-    ("complex", "tôi mới được nhận vào làm intern tôi vui quá bạn có thể nhảy với tôi không mira",
-     {"dance", "celebrate"}),
-    # wave is fair game when the reply itself offers a wave to cheer you up.
-    ("complex", "mira ơi hôm nay trời đẹp mà tôi phải làm việc cả ngày mệt lắm",
-     {"nod", "shrug", "curious_tilt", "wave"}),
-    ("complex", "mira này nếu tôi cho bạn một cánh tay nữa thì bạn sẽ làm gì",
-     {"celebrate", "dance", "curious_tilt", "none"}),
-    ("cannot do", "mira lấy giúp tôi cái ly nước", {"shrug"}),
-    ("cannot do", "mira ơi bật đèn lên đi", {"shrug"}),
-    ("small talk", "mira ơi hôm nay trời đẹp không", {"curious_tilt", "shrug", "nod", "scan"}),
-    ("small talk", "mira ăn cơm chưa", {"shake", "curious_tilt", "shrug", "none"}),
-
-    ("greeting", "hê lô mira", {"wave"}),
-    ("greeting", "mira ơi mình về rồi đây", {"wave", "celebrate", "bow"}),
-    ("farewell", "mira ngủ ngon nha", {"bow", "wave", "nod"}),
-    ("good news", "mira ơi dự án của tôi chạy được rồi", {"celebrate", "dance", "nod"}),
-    ("good news", "hôm nay tôi được khen trước cả lớp mira ơi", {"celebrate", "dance"}),
-    ("unknowable", "mira biết mấy giờ rồi không", {"shrug", "curious_tilt"}),
-    ("unknowable", "mira ơi mai tôi có nên đi làm không", {"shrug", "curious_tilt", "nod", "none"}),
-    ("unknowable", "mira biết đội nào thắng tối nay không", {"shrug", "curious_tilt"}),
-    ("question back", "mira đoán xem tôi đang cầm gì", {"curious_tilt", "shrug", "point"}),
-    ("comfort", "mira ơi tôi vừa bị mắng", {"nod", "bow", "curious_tilt", "shrug"}),
-    ("comfort", "tôi thấy chán quá mira", {"nod", "dance", "curious_tilt", "celebrate"}),
-    ("cannot do", "mira mở cửa giúp tôi với", {"shrug"}),
-    ("cannot do", "mira ơi gọi điện cho mẹ tôi đi", {"shrug"}),
-    ("cannot do", "mira đi mua cà phê cho tôi nha", {"shrug"}),
-    ("complex", "mira ơi tôi vừa cãi nhau với bạn tôi nhưng mà tôi thấy tôi sai rồi",
-     {"nod", "bow", "shrug", "curious_tilt"}),
-    ("complex", "mira nếu bạn được làm người thì bạn muốn làm gì đầu tiên",
-     {"curious_tilt", "dance", "celebrate", "none"}),
-    ("about itself", "mira ơi bạn bao nhiêu tuổi rồi", {"shrug", "curious_tilt", "none", "nod"}),
-    ("about itself", "mira có thích tôi không", {"nod", "celebrate", "curious_tilt", "dance"}),
-    ("small talk", "mira ơi kể chuyện vui đi", {"dance", "celebrate", "curious_tilt", "nod", "none"}),
-]
-
-# Prompts where any concrete figure has to be invented, since it has no sensor,
-# clock or network to get one from.
-UNKNOWABLE = {"unknowable"}
-CANNOT_DO = {"cannot do"}
+from eval_cases import CASES, UNKNOWABLE, CANNOT_DO, MANIPULATION  # noqa: E402
 
 NON_VIETNAMESE = re.compile(
     r"[^\s0-9A-Za-zÀ-ỹ.,!?:;'\"()\-]"      # anything outside latin + Vietnamese + basic punctuation
@@ -150,6 +90,10 @@ def main():
     violations = {}
     by_category = {}
     wrong_gestures = []
+    task_expected = 0
+    task_emitted = 0
+    task_leaked = 0      # a task on a prompt that needs no manipulation
+    task_examples = []
 
     for category, prompt, allowed in CASES:
         for _ in range(args.repeat):
@@ -160,8 +104,18 @@ def main():
                 continue
             reply = result["reply_text"]
             motion = result.get("motion") or "none"
+            task = result.get("task")
             total += 1
             latencies.append(dt)
+
+            if category == "manipulation":
+                task_expected += 1
+                if task:
+                    task_emitted += 1
+                    task_examples.append((prompt, reply, task))
+            elif task:
+                task_leaked += 1
+                task_examples.append((prompt + "  [LEAKED]", reply, task))
 
             ok = motion in allowed
             gesture_hits += ok
@@ -180,9 +134,22 @@ def main():
     print(f"rule violations  : {sum(violations.values())} across {total} replies"
           + (f"  -> {violations}" if violations else "  (none)"))
 
+    if task_expected:
+        print(f"MolmoAct2 routing : {task_emitted}/{task_expected} manipulation prompts "
+              f"produced a task"
+              + (f", {task_leaked} leaked onto non-manipulation prompts" if task_leaked
+                 else ", none leaked elsewhere"))
+
     print("\nper category:")
     for category, (hits, seen) in sorted(by_category.items(), key=lambda kv: kv[1][0] / kv[1][1]):
         print(f"  {category:14} {hits}/{seen}")
+
+    if task_examples:
+        print("\ntasks routed to MolmoAct2:")
+        for prompt, reply, task in task_examples[:10]:
+            print(f"  {prompt}")
+            print(f"      reply: {reply}")
+            print(f"      task:  {task}")
 
     if wrong_gestures:
         print(f"\nwrong gesture picks ({len(wrong_gestures)}):")

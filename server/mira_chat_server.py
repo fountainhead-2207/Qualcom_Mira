@@ -47,6 +47,10 @@ PORT = 8766
 # dependency in the same venv that serves MolmoAct2 - not worth the risk. Going
 # bigger cleanly means vLLM in its own venv serving those FP8 files.
 LLM_NAME = "Qwen/Qwen3-4B-Instruct-2507"
+# Only matters for models with a thinking mode (Qwen3.5 emits <think>...</think>
+# by default, which would blow the latency budget several times over). Harmless
+# for -Instruct-2507, which has no such mode.
+ENABLE_THINKING = False
 PIPER_MODEL = "/data/qualcom-robotic/piper-voices/vi_VN/vi_VN-vais1000-medium.onnx"
 
 # Existing canned motions plus the proposed-but-not-yet-recorded ones (see
@@ -89,9 +93,12 @@ SYSTEM_PROMPT = (
     "3. Gọi người dùng là 'bạn'. MIRA LÀ TÊN CỦA BẠN - không bao giờ gọi người "
     "dùng là Mira.\n"
     "4. Xưng 'mình' hoặc 'tôi'. Không dùng 'mày', 'tao'.\n"
-    "5. Bạn CHỈ có một cánh tay robot và làm được vài cử chỉ. Bạn KHÔNG cầm, lấy, "
-    "mang đồ, không bật đèn, không điều khiển thiết bị. Nếu được nhờ những việc đó, "
-    "hãy vui vẻ thừa nhận là chưa làm được (và chọn cử chỉ shrug).\n"
+    "5. Bạn có một cánh tay robot đặt trên bàn làm việc. Bạn CÓ THỂ thử cầm, nhặt, "
+    "hoặc di chuyển những vật nhỏ đang ở trên bàn đó. Khi người dùng nhờ làm việc "
+    "như vậy, hãy nhận lời một cách vui vẻ và điền thêm trường \"task\" (xem dưới).\n"
+    "   Nhưng bạn KHÔNG rời khỏi bàn, không đi lấy đồ ở nơi khác, không bật đèn, "
+    "không gọi điện, không điều khiển thiết bị nào khác. Những việc đó thì thừa nhận "
+    "là không làm được (và chọn cử chỉ shrug).\n"
     "6. Nếu không biết điều gì đó (thời tiết, giá cả, tin tức, chuyện tương lai), "
     "hãy thật thà nói là không biết theo kiểu tinh nghịch. TUYỆT ĐỐI KHÔNG bịa số "
     "liệu hay thông tin.\n"
@@ -103,8 +110,15 @@ SYSTEM_PROMPT = (
     "\n"
     "Đừng mặc định chọn wave - chỉ dùng wave khi thật sự đang chào hỏi.\n"
     "\n"
+    "NẾU người dùng nhờ cầm/nhặt/di chuyển một vật trên bàn, thêm trường \"task\": "
+    "mô tả việc đó bằng MỘT CÂU TIẾNG ANH ngắn, theo mẫu \"pick up the <vật> and "
+    "put it on the table\". Chỉ điền \"task\" cho việc thao tác vật thể; những "
+    "trường hợp khác thì bỏ trường này ra.\n"
+    "\n"
     "Trả lời CHỈ bằng JSON đúng định dạng, không thêm gì khác:\n"
-    "{\"reply\": \"...\", \"motion\": \"...\"}"
+    "{\"reply\": \"...\", \"motion\": \"...\"}\n"
+    "hoặc khi cần thao tác vật thể:\n"
+    "{\"reply\": \"...\", \"motion\": \"...\", \"task\": \"pick up the ... and put it on the table\"}"
 )
 
 # A 3B model follows demonstrated behaviour far more reliably than stated rules.
@@ -117,9 +131,15 @@ SYSTEM_PROMPT = (
 # read a plain goodbye as a request it couldn't fulfil. One refusal example is
 # enough, and the warm ones sit last because the closest examples pull hardest.
 FEW_SHOT = [
-    ("mira lấy giúp tôi cái ly nước",
-     '{"reply": "Mình chỉ có một cánh tay quơ quơ thôi, bưng nước thì chịu rồi!", '
+    # Off-table requests are the refusal case now that on-table manipulation is
+    # real. The old example here was "fetch me a glass of water", which became
+    # ambiguous - a glass sitting on the table is exactly what it can pick up.
+    ("mira ơi bật đèn lên đi",
+     '{"reply": "Mình có tay chứ không có công tắc, cái đó bạn tự bật nha!", '
      '"motion": "shrug"}'),
+    ("tôi đánh rơi cái tua vít mà đang đau lưng không nhặt được, bạn nhặt giúp mình nhé",
+     '{"reply": "Để mình nhặt cho, bạn ngồi nghỉ đi nha!", "motion": "nod", '
+     '"task": "pick up the screwdriver and put it on the table"}'),
     ("chào mira",
      '{"reply": "Chào bạn! Mình đây, sẵn sàng quậy rồi!", "motion": "wave"}'),
     ("tôi vừa thi đậu rồi mira ơi",
@@ -226,7 +246,8 @@ def choose_gesture(reply_text):
         messages.append({"role": "assistant", "content": example_motion})
     messages.append({"role": "user", "content": reply_text})
 
-    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True,
+                                           enable_thinking=ENABLE_THINKING)
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
         out = model.generate(**inputs, max_new_tokens=8, do_sample=False,
@@ -246,13 +267,14 @@ def generate_reply(heard_text):
         messages.append({"role": "assistant", "content": example_reply})
     messages.append({"role": "user", "content": heard_text})
 
-    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True,
+                                           enable_thinking=ENABLE_THINKING)
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
         # 0.6 rather than 0.7: the examples pin the persona down, and the extra
         # randomness mostly showed up as rule violations rather than variety.
-        out = model.generate(**inputs, max_new_tokens=120, do_sample=True, temperature=0.6,
-                              pad_token_id=tokenizer.eos_token_id)
+        out = model.generate(**inputs, max_new_tokens=140, do_sample=True, temperature=0.6,
+                             pad_token_id=tokenizer.eos_token_id)
     text = tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
 
     obj, prose = extract_reply_json(text)
@@ -260,12 +282,16 @@ def generate_reply(heard_text):
         # Log the raw generation - a silent fallback here was hiding a 2-in-3
         # parse failure rate, which looked like the model refusing to answer.
         print(f"  [unparsed LLM output] {text!r}", flush=True)
-        return (prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), "none"
+        return (prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), "none", None
     reply = obj.get("reply", "").strip()
     motion = str(obj.get("motion", "none")).strip()
     if motion not in EXISTING_MOTIONS + PROPOSED_MOTIONS:
         motion = "none"
-    return (reply or prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), motion
+    # A manipulation request routes to MolmoAct2 instead of a canned gesture.
+    # Kept as a plain string here; the board decides what to do with it.
+    task = obj.get("task")
+    task = task.strip() if isinstance(task, str) and task.strip() else None
+    return (reply or prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), motion, task
 
 
 TRAIL_SILENCE_S = 0.3
@@ -333,14 +359,21 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        reply, motion = generate_reply(heard_text)
+        reply, motion, task = generate_reply(heard_text)
         wav_bytes = synthesize(reply)
         response = {
             "reply_text": reply,
             "motion": None if motion == "none" else motion,
             "motion_is_proposed": motion in PROPOSED_MOTIONS,
+            # Set when the request needs real manipulation rather than a canned
+            # gesture - an English task string for MolmoAct2. The board decides
+            # whether to act on it; today it can only shadow-log, because
+            # MolmoAct2 needs two cameras and the wrist one is dead hardware.
+            "task": task,
             "audio_wav_base64": base64.b64encode(wav_bytes).decode("ascii"),
         }
+        if task:
+            print(f"  [manipulation task] {task!r}", flush=True)
         payload = json.dumps(response).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
