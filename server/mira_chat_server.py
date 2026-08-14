@@ -34,7 +34,19 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from piper import PiperVoice
 
 PORT = 8766
-LLM_NAME = "Qwen/Qwen2.5-3B-Instruct"
+# Qwen2.5-3B followed the persona rules poorly - it slipped into "tao", mixed
+# Chinese mid-sentence, invented a bitcoin price, and picked gestures close to
+# randomly. This is a generation newer at a similar size, and the -Instruct-2507
+# variant has no thinking mode, so replies stay short without extra prompting.
+#
+# The 8B/14B FP8 checkpoints already sitting in /data/KV_cache/LMbench are a
+# dead end for plain transformers: FP8 needs a Triton kernel from the `kernels`
+# package, and installing it broke transformers outright (its newer
+# LayerRepository API is incompatible with transformers 5.5.4). AWQ 4-bit would
+# fit VRAM better than this does but needs `gptqmodel`, another compiled-CUDA
+# dependency in the same venv that serves MolmoAct2 - not worth the risk. Going
+# bigger cleanly means vLLM in its own venv serving those FP8 files.
+LLM_NAME = "Qwen/Qwen3-4B-Instruct-2507"
 PIPER_MODEL = "/data/qualcom-robotic/piper-voices/vi_VN/vi_VN-vais1000-medium.onnx"
 
 # Existing canned motions plus the proposed-but-not-yet-recorded ones (see
@@ -48,13 +60,79 @@ EXISTING_MOTIONS = ["wave", "dance", "nod", "shake", "play-dead", "scan",
                     "shrug", "point", "bow", "celebrate", "curious_tilt"]
 PROPOSED_MOTIONS = []  # all of docs/gesture_proposals.md is recorded now
 
+# Spelling out when each gesture applies matters more than listing them: with
+# only names to go on, the model reached for "wave" on 11 of 24 test prompts and
+# never once picked shrug, bow or point - including for "I don't know which
+# company to choose", which is the textbook shrug.
+GESTURE_GUIDE = [
+    ("wave", "chào hỏi lúc mới gặp"),
+    ("bow", "chào tạm biệt, hoặc khi được cảm ơn"),
+    ("celebrate", "người dùng có tin vui, thành công, đáng chúc mừng"),
+    ("dance", "người dùng rủ nhảy, hoặc cực kỳ vui"),
+    ("shrug", "KHÔNG biết, không chắc, không có thông tin, hoặc không làm được"),
+    ("curious_tilt", "tò mò, ngạc nhiên, hoặc đang hỏi lại người dùng"),
+    ("point", "nhắc tới một vật cụ thể ở đâu đó"),
+    ("nod", "đồng ý, xác nhận, hoặc đang lắng nghe an ủi"),
+    ("shake", "phủ định, từ chối"),
+    ("scan", "đang tìm, đang quan sát xung quanh"),
+    ("play-dead", "giả vờ hết pin, làm trò cho vui"),
+]
+
 SYSTEM_PROMPT = (
-    "Bạn là Mira, một cánh tay robot thân thiện, trả lời ngắn gọn bằng tiếng Việt "
-    "(1-2 câu, tối đa khoảng 30 từ). Giọng điệu vui vẻ, tự nhiên, như một người bạn nhỏ. "
-    "Sau khi trả lời, chọn ĐÚNG MỘT cử chỉ phù hợp nhất với câu trả lời từ danh sách sau, "
-    f"hoặc \"none\" nếu không cử chỉ nào phù hợp: {', '.join(EXISTING_MOTIONS + PROPOSED_MOTIONS + ['none'])}.\n"
-    "Trả lời CHỈ bằng JSON đúng định dạng: {\"reply\": \"...\", \"motion\": \"...\"}"
+    "Bạn là Mira - một cánh tay robot nhỏ, tinh nghịch và hài hước. Bạn thích trêu "
+    "vui, hay pha một câu tếu, nhưng luôn tử tế và không bao giờ thô.\n"
+    "\n"
+    "QUY TẮC BẮT BUỘC:\n"
+    "1. Chỉ nói TIẾNG VIỆT. Tuyệt đối không dùng tiếng Anh, tiếng Trung, emoji, "
+    "hay ký hiệu lạ - câu trả lời sẽ được đọc thành tiếng nên những thứ đó nghe rất kỳ.\n"
+    "2. Ngắn gọn: 1-2 câu, tối đa khoảng 25 từ.\n"
+    "3. Gọi người dùng là 'bạn'. MIRA LÀ TÊN CỦA BẠN - không bao giờ gọi người "
+    "dùng là Mira.\n"
+    "4. Xưng 'mình' hoặc 'tôi'. Không dùng 'mày', 'tao'.\n"
+    "5. Bạn CHỈ có một cánh tay robot và làm được vài cử chỉ. Bạn KHÔNG cầm, lấy, "
+    "mang đồ, không bật đèn, không điều khiển thiết bị. Nếu được nhờ những việc đó, "
+    "hãy vui vẻ thừa nhận là chưa làm được (và chọn cử chỉ shrug).\n"
+    "6. Nếu không biết điều gì đó (thời tiết, giá cả, tin tức, chuyện tương lai), "
+    "hãy thật thà nói là không biết theo kiểu tinh nghịch. TUYỆT ĐỐI KHÔNG bịa số "
+    "liệu hay thông tin.\n"
+    "\n"
+    "Sau đó chọn ĐÚNG MỘT cử chỉ khớp nhất với câu trả lời:\n"
+    + "\n".join(f"- {name}: {when}" for name, when in GESTURE_GUIDE
+                if name in EXISTING_MOTIONS + PROPOSED_MOTIONS)
+    + "\n- none: không cử chỉ nào phù hợp\n"
+    "\n"
+    "Đừng mặc định chọn wave - chỉ dùng wave khi thật sự đang chào hỏi.\n"
+    "\n"
+    "Trả lời CHỈ bằng JSON đúng định dạng, không thêm gì khác:\n"
+    "{\"reply\": \"...\", \"motion\": \"...\"}"
 )
+
+# A 3B model follows demonstrated behaviour far more reliably than stated rules.
+# Rules alone still produced "tao đang chơi điện thoại", a stray "Chị", Chinese
+# mid-sentence, and shake for a goodbye; each example below pins down one of
+# those, plus the JSON shape.
+# Balance matters as much as content: an earlier set with two "I can't do that"
+# examples out of six taught it to refuse almost everything - it answered "hôm
+# nay tôi mệt quá" with "mình chỉ là cánh tay robot, không có phép màu đâu", and
+# read a plain goodbye as a request it couldn't fulfil. One refusal example is
+# enough, and the warm ones sit last because the closest examples pull hardest.
+FEW_SHOT = [
+    ("mira lấy giúp tôi cái ly nước",
+     '{"reply": "Mình chỉ có một cánh tay quơ quơ thôi, bưng nước thì chịu rồi!", '
+     '"motion": "shrug"}'),
+    ("chào mira",
+     '{"reply": "Chào bạn! Mình đây, sẵn sàng quậy rồi!", "motion": "wave"}'),
+    ("tôi vừa thi đậu rồi mira ơi",
+     '{"reply": "Oa, giỏi quá! Cho mình ăn mừng một cái nhé!", "motion": "celebrate"}'),
+    ("mira ơi hôm nay trời đẹp không",
+     '{"reply": "Mình ở trong nhà suốt nên không biết, bạn kể mình nghe đi!", '
+     '"motion": "curious_tilt"}'),
+    ("tạm biệt mira hẹn mai gặp lại",
+     '{"reply": "Mai gặp lại nha bạn, mình chờ đó!", "motion": "bow"}'),
+    ("mira ơi hôm nay tôi mệt quá",
+     '{"reply": "Thương bạn quá, nghỉ chút đi rồi mình kể chuyện vui cho nghe!", '
+     '"motion": "nod"}'),
+]
 
 print(f"Loading {LLM_NAME}...", flush=True)
 tokenizer = AutoTokenizer.from_pretrained(LLM_NAME)
@@ -110,15 +188,70 @@ def extract_reply_json(text):
     return None, prose
 
 
-def generate_reply(heard_text):
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": heard_text},
-    ]
+CLASSIFY_PROMPT = (
+    "Bạn chọn cử chỉ cho một cánh tay robot. Dưới đây là câu robot vừa nói.\n"
+    "Chọn ĐÚNG MỘT cử chỉ khớp nhất:\n"
+    + "\n".join(f"- {name}: {when}" for name, when in GESTURE_GUIDE
+                if name in EXISTING_MOTIONS + PROPOSED_MOTIONS)
+    + "\n- none: không cử chỉ nào phù hợp\n"
+    "\nChỉ trả về tên cử chỉ, không giải thích, không thêm gì khác."
+)
+
+CLASSIFY_EXAMPLES = [
+    ("Chào bạn! Mình đây, sẵn sàng quậy rồi!", "wave"),
+    ("Mai gặp lại nha bạn, mình chờ đó!", "bow"),
+    ("Ngủ ngon nha bạn, mai lại chơi tiếp!", "bow"),
+    ("Oa, giỏi quá! Chúc mừng bạn nha!", "celebrate"),
+    ("Mình mù tịt luôn, không biết đâu bạn ơi!", "shrug"),
+    ("Bưng nước thì mình chịu rồi, chỉ có một cánh tay thôi!", "shrug"),
+    ("Thương bạn quá, nghỉ chút đi nha!", "nod"),
+    ("Ủa thật hả bạn? Kể mình nghe đi!", "curious_tilt"),
+    ("Cái kia kìa, ngay đó đó!", "point"),
+    ("Nhảy luôn đi, mình quậy với bạn!", "dance"),
+]
+
+
+def choose_gesture(reply_text):
+    """Pick the gesture in a separate pass, given only the finished reply.
+
+    Asking one 3B model to compose a reply and classify it into a dozen gesture
+    labels in the same breath made the classification near-random: shake (a
+    head-shake, i.e. "no") came back for goodbyes, a pay rise and words of
+    comfort alike. Split out, with greedy decoding so the same reply always maps
+    to the same gesture, it has one easy job instead of two.
+    """
+    messages = [{"role": "system", "content": CLASSIFY_PROMPT}]
+    for example_reply, example_motion in CLASSIFY_EXAMPLES:
+        messages.append({"role": "user", "content": example_reply})
+        messages.append({"role": "assistant", "content": example_motion})
+    messages.append({"role": "user", "content": reply_text})
+
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
-        out = model.generate(**inputs, max_new_tokens=120, do_sample=True, temperature=0.7,
+        out = model.generate(**inputs, max_new_tokens=8, do_sample=False,
+                             pad_token_id=tokenizer.eos_token_id)
+    answer = tokenizer.decode(out[0][inputs["input_ids"].shape[1]:],
+                              skip_special_tokens=True).strip().lower()
+    for name in EXISTING_MOTIONS + PROPOSED_MOTIONS:
+        if name.replace("_", "").replace("-", "") in answer.replace("_", "").replace("-", ""):
+            return name
+    return "none"
+
+
+def generate_reply(heard_text):
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for example_user, example_reply in FEW_SHOT:
+        messages.append({"role": "user", "content": example_user})
+        messages.append({"role": "assistant", "content": example_reply})
+    messages.append({"role": "user", "content": heard_text})
+
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    with torch.no_grad():
+        # 0.6 rather than 0.7: the examples pin the persona down, and the extra
+        # randomness mostly showed up as rule violations rather than variety.
+        out = model.generate(**inputs, max_new_tokens=120, do_sample=True, temperature=0.6,
                               pad_token_id=tokenizer.eos_token_id)
     text = tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
 
@@ -137,6 +270,22 @@ def generate_reply(heard_text):
 
 TRAIL_SILENCE_S = 0.3
 
+# The system prompt forbids emoji and non-Vietnamese script, but the model
+# leaked both in testing ("À yeah, let's dance! 🎉", "làm很多事情呢！"), and
+# whatever slips through gets read aloud. Strip it here so a prompt-following
+# lapse can't reach the speaker.
+_UNSPEAKABLE = re.compile(
+    "[^"
+    r"0-9A-Za-zÀ-ỹ"          # latin + the full Vietnamese range
+    r"\s.,!?:;'\"()\-"       # punctuation espeak handles sensibly
+    "]+"
+)
+
+
+def strip_unspeakable(text):
+    cleaned = _UNSPEAKABLE.sub(" ", text)
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
 
 def synthesize(text):
     # "Mira" written plainly gets phonemized with English phones (schwa + ɹ)
@@ -148,6 +297,7 @@ def synthesize(text):
     # this change. A space reads at a natural pace; a hyphen produces the
     # same phonemes but the duration model rushes it, like a single word.
     speakable = re.sub(r"\bmira\b", "Mi ra", text, flags=re.IGNORECASE)
+    speakable = strip_unspeakable(speakable)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         voice.synthesize_wav(speakable, wf)
