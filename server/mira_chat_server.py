@@ -40,7 +40,11 @@ PIPER_MODEL = "/data/qualcom-robotic/piper-voices/vi_VN/vi_VN-vais1000-medium.on
 # Existing canned motions plus the proposed-but-not-yet-recorded ones (see
 # docs/gesture_proposals.md) - the LLM is told which are real vs aspirational
 # so it can be steered toward "none" until those are recorded.
-EXISTING_MOTIONS = ["wave", "dance", "nod", "shake", "play-dead", "clean", "scan", "thinking", "shrug"]
+# "thinking" is deliberately absent: board_voice_control.py fires it itself the
+# moment a free-form remark is heard, to fill this server's own round-trip. If
+# the LLM could also pick it, it would arrive with the answer instead - after
+# the waiting it exists to cover.
+EXISTING_MOTIONS = ["wave", "dance", "nod", "shake", "play-dead", "clean", "scan", "shrug"]
 PROPOSED_MOTIONS = ["point", "bow", "celebrate", "curious_tilt"]
 
 SYSTEM_PROMPT = (

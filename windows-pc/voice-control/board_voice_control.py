@@ -61,6 +61,10 @@ CHAT_TIMEOUT_S = 8
 BT_SPEAKER_MAC = "4C:3C:8F:3C:42:EE"
 BT_APLAY_DEVICE = f"plug:'bluealsa:DEV={BT_SPEAKER_MAC},PROFILE=a2dp'"
 
+# Played automatically while waiting on the chat server, not something the LLM
+# gets to choose - see chat_and_speak().
+THINKING_MOTION = "thinking"
+
 METRICS_PORT = 9103
 AUDIO_RMS = Gauge("board_audio_rms", "RMS of the most recent audio hop")
 DECODE_MS = Gauge("board_decode_ms", "Latency of the most recent rolling-window ASR decode")
@@ -193,9 +197,32 @@ chat_busy = threading.Event()
 
 
 def chat_and_speak(heard_text):
-    """Ask mira_chat_server.py for a reply + gesture, play the reply out loud,
-    and run the gesture if one was picked and already exists as a real motion
-    (docs/gesture_proposals.md's new ones need recording first)."""
+    """Pose "thinking", ask mira_chat_server.py for a reply + gesture, speak the
+    reply, then run that gesture.
+
+    "thinking" is fired here rather than being offered to the LLM as one of the
+    gestures it can pick: its whole purpose is to fill the round-trip, so it has
+    to start before the request, not arrive with the answer. The arm holds the
+    pose while it waits - the geared STS3215s keep a balanced posture even after
+    mira-robot disconnects and drops torque (verified on the real arm).
+
+    Ordering is forced by mira-robot's exclusive robot lock: the reply's gesture
+    can't start until the thinking replay has released it, so it's joined below.
+    Speech doesn't contend for that lock, so the answer still plays as soon as
+    it arrives rather than waiting for the arm.
+    """
+    robot_busy.set()
+
+    def _pose_thinking():
+        try:
+            replay_motion(THINKING_MOTION)
+        except Exception as e:
+            print(f"  (thinking pose failed: {e})", flush=True)
+
+    thinking = threading.Thread(target=_pose_thinking, daemon=True)
+    thinking.start()
+
+    result = None
     try:
         req = urllib.request.Request(
             CHAT_SERVER_URL,
@@ -206,16 +233,21 @@ def chat_and_speak(heard_text):
             result = json.loads(resp.read())
     except Exception as e:
         print(f"  chat server unreachable ({e}) - skipping", flush=True)
-        return
     finally:
         chat_busy.clear()
 
-    print(f"  Mira: {result['reply_text']}", flush=True)
-    wav_bytes = base64.b64decode(result["audio_wav_base64"])
-    wav_path = DEBUG_DIR / "chat_reply.wav"
-    wav_path.write_bytes(wav_bytes)
-    subprocess.run(["aplay", "-D", BT_APLAY_DEVICE, str(wav_path)], capture_output=True)
+    if result is not None:
+        print(f"  Mira: {result['reply_text']}", flush=True)
+        wav_bytes = base64.b64decode(result["audio_wav_base64"])
+        wav_path = DEBUG_DIR / "chat_reply.wav"
+        wav_path.write_bytes(wav_bytes)
+        subprocess.run(["aplay", "-D", BT_APLAY_DEVICE, str(wav_path)], capture_output=True)
 
+    thinking.join(timeout=90)
+    robot_busy.clear()
+
+    if result is None:
+        return
     motion = result.get("motion")
     if motion and not result.get("motion_is_proposed"):
         run_command(motion)
@@ -226,18 +258,24 @@ def chat_and_speak(heard_text):
 robot_busy = threading.Event()
 
 
+def replay_motion(motion):
+    """Run one motion to completion. mira-robot takes an exclusive lock on the
+    robot, so only one of these can be in flight at a time."""
+    print(f"  >>> mira-robot replay {motion} ...", flush=True)
+    result = subprocess.run(
+        ["mira-robot", "replay", motion, "--yes"],
+        capture_output=True, text=True, timeout=90,
+    )
+    last = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "(no output)"
+    print("  ", last, flush=True)
+    if result.returncode != 0:
+        print("  error:", result.stderr.strip(), flush=True)
+
+
 def run_command(motion):
     def _worker():
-        print(f"  >>> mira-robot replay {motion} ...", flush=True)
         try:
-            result = subprocess.run(
-                ["mira-robot", "replay", motion, "--yes"],
-                capture_output=True, text=True, timeout=60,
-            )
-            last = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "(no output)"
-            print("  ", last, flush=True)
-            if result.returncode != 0:
-                print("  error:", result.stderr.strip(), flush=True)
+            replay_motion(motion)
         finally:
             robot_busy.clear()
 
