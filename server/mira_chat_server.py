@@ -102,6 +102,12 @@ SYSTEM_PROMPT = (
     "6. Nếu không biết điều gì đó (thời tiết, giá cả, tin tức, chuyện tương lai), "
     "hãy thật thà nói là không biết theo kiểu tinh nghịch. TUYỆT ĐỐI KHÔNG bịa số "
     "liệu hay thông tin.\n"
+    "7. Khi nhận làm việc gì, nói ở thể SẮP LÀM (\"để mình nhặt cho\", \"mình thử "
+    "nha\"). TUYỆT ĐỐI KHÔNG nói như đã làm xong (\"mình vừa nhặt rồi\", \"đã tìm "
+    "thấy rồi\") - lúc trả lời thì bạn chưa làm gì cả.\n"
+    "8. Bạn KHÔNG nhìn thấy gì cả (không có mắt). Nếu được hỏi vật gì ở đâu, đừng "
+    "nói là đã thấy - hãy thừa nhận không biết, hoặc đề nghị thử nhặt nếu người "
+    "dùng chỉ chỗ.\n"
     "\n"
     "Sau đó chọn ĐÚNG MỘT cử chỉ khớp nhất với câu trả lời:\n"
     + "\n".join(f"- {name}: {when}" for name, when in GESTURE_GUIDE
@@ -111,9 +117,11 @@ SYSTEM_PROMPT = (
     "Đừng mặc định chọn wave - chỉ dùng wave khi thật sự đang chào hỏi.\n"
     "\n"
     "NẾU người dùng nhờ cầm/nhặt/di chuyển một vật trên bàn, thêm trường \"task\": "
-    "mô tả việc đó bằng MỘT CÂU TIẾNG ANH ngắn, theo mẫu \"pick up the <vật> and "
-    "put it on the table\". Chỉ điền \"task\" cho việc thao tác vật thể; những "
-    "trường hợp khác thì bỏ trường này ra.\n"
+    "mô tả việc đó bằng MỘT CÂU TIẾNG ANH, BẮT BUỘC bắt đầu bằng \"pick up the\", "
+    "theo mẫu \"pick up the <vật> and put it on the table\". Cánh tay chỉ biết gắp "
+    "và đặt - không có việc gì khác điền vào đây được.\n"
+    "Bỏ hẳn trường \"task\" khi người dùng chỉ hỏi, chỉ trò chuyện, rủ nhảy, hay "
+    "nhờ việc mà bạn không làm được.\n"
     "\n"
     "Trả lời CHỈ bằng JSON đúng định dạng, không thêm gì khác:\n"
     "{\"reply\": \"...\", \"motion\": \"...\"}\n"
@@ -161,6 +169,12 @@ model.eval()
 print("Loading Piper voice...", flush=True)
 voice = PiperVoice.load(PIPER_MODEL)
 print("Ready.", flush=True)
+
+
+# MolmoAct2's fine-tune was trained on instructions of the form "pick up the
+# screwdriver and put it on the black workspace" - see docs/gpu-training-server.md.
+# Anything not shaped like that is not something it can act on.
+TASK_SHAPE = re.compile(r"^pick up (the|a|an) \S+", re.IGNORECASE)
 
 
 def extract_reply_json(text):
@@ -288,9 +302,15 @@ def generate_reply(heard_text):
     if motion not in EXISTING_MOTIONS + PROPOSED_MOTIONS:
         motion = "none"
     # A manipulation request routes to MolmoAct2 instead of a canned gesture.
-    # Kept as a plain string here; the board decides what to do with it.
+    # Validated rather than trusted: the model emitted "dance with the user" as a
+    # task, and MolmoAct2 only does pick-and-place - anything else handed to it is
+    # meaningless. Its training tasks all read "pick up the X and put it ...", so
+    # that prefix is the gate.
     task = obj.get("task")
     task = task.strip() if isinstance(task, str) and task.strip() else None
+    if task and not TASK_SHAPE.match(task):
+        print(f"  [dropped malformed task] {task!r}", flush=True)
+        task = None
     return (reply or prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), motion, task
 
 

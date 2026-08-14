@@ -63,6 +63,37 @@ nhưng nó không dạy nhãn cử chỉ. Muốn tune thì phải tự sinh data
 mạnh sinh ra các cặp `câu người dùng → câu trả lời playful + cử chỉ`, rồi LoRA).
 Ở mức 94% thì chưa cần.
 
+## Lượng tử hóa INT4 - đo trước khi tin
+
+Giả thiết "INT4 thì nhanh hơn" **không đúng cho trường hợp này**, hoặc ít nhất
+không hiển nhiên: ở batch 1 trên GPU rời, trọng số nhỏ đi giúp đỡ VRAM nhưng mỗi
+token phải giải nén thêm, nên độ trễ thường **tăng**. INT4 chỉ thắng khi thật sự
+bị giới hạn băng thông bộ nhớ - với model 4B trên 4090 thì không phải vậy.
+
+`tools/bench_int4.py` đo cả hai (bf16 vs bitsandbytes NF4) trên đúng máy này:
+VRAM, thời gian nạp, tok/s, và in ra câu trả lời để kiểm tra chất lượng không
+tụt. Chạy nó rồi hãy quyết định, đừng đổi vì cảm giác.
+
+`bitsandbytes` cài được an toàn vào `molmoact2-env` (wheel có sẵn binary, không
+biên dịch, đã xác nhận transformers vẫn import bình thường sau khi cài) - khác
+hẳn `kernels` và `gptqmodel`.
+
+**Nếu sau này thật sự cần lượng tử hóa** (để nhét 8B/14B vào ngân sách VRAM):
+đừng dùng bitsandbytes NF4. Theo tổng hợp 2026, **AWQ và AutoRound dẫn đầu về độ
+chính xác ở 4-bit**; AWQ bảo vệ khoảng 1% trọng số quan trọng nhất dựa trên độ
+lớn activation nên giữ được gần như nguyên độ chính xác, và đã thành mặc định cho
+serving GPU. SmoothQuant vốn nhắm W8A8 nên không phải lựa chọn cho W4.
+
+Quan trọng hơn cả định dạng: **kernel quyết định tốc độ**. Cùng một model AWQ,
+kernel thường cho ~68 tok/s còn **Marlin cho ~741 tok/s** trên cùng GPU. Đây mới
+là lý do NF4 trong transformers chậm - không phải vì 4-bit. Nên nếu mục tiêu là
+tốc độ thì đường đúng là **AWQ + Marlin qua vLLM**, không phải bnb trong
+transformers.
+
+`transformers` 5.5.4 ở đây có sẵn `quantizer_auto_round.py`, `quantizer_hqq.py`,
+`quantizer_higgs.py`, `quantizer_sinq.py` - tức là AutoRound và vài phương pháp
+mới đều dùng được, chỉ cần gói tương ứng.
+
 ## Hướng nâng cấp nếu cần
 
 - **Qwen3.5-4B** (9.3GB, kiến trúc `qwen3_5` - transformers 5.5.4 đã hỗ trợ) là
