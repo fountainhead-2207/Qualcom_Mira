@@ -44,8 +44,9 @@ PIPER_MODEL = "/data/qualcom-robotic/piper-voices/vi_VN/vi_VN-vais1000-medium.on
 # moment a free-form remark is heard, to fill this server's own round-trip. If
 # the LLM could also pick it, it would arrive with the answer instead - after
 # the waiting it exists to cover.
-EXISTING_MOTIONS = ["wave", "dance", "nod", "shake", "play-dead", "clean", "scan", "shrug"]
-PROPOSED_MOTIONS = ["point", "bow", "celebrate", "curious_tilt"]
+EXISTING_MOTIONS = ["wave", "dance", "nod", "shake", "play-dead", "clean", "scan",
+                    "shrug", "point", "bow", "celebrate", "curious_tilt"]
+PROPOSED_MOTIONS = []  # all of docs/gesture_proposals.md is recorded now
 
 SYSTEM_PROMPT = (
     "Bạn là Mira, một cánh tay robot thân thiện, trả lời ngắn gọn bằng tiếng Việt "
@@ -64,6 +65,51 @@ voice = PiperVoice.load(PIPER_MODEL)
 print("Ready.", flush=True)
 
 
+def extract_reply_json(text):
+    """Recover {"reply": ..., "motion": ...} from a generation, plus any prose
+    that preceded it.
+
+    Two model quirks make naive parsing fail most of the time here:
+      - a plain `\\{.*\\}` search is greedy, so when more than one object is
+        emitted it spans from the first brace to the last and yields garbage;
+        each candidate object is brace-matched individually instead.
+      - Qwen very often drops the closing quote on the last value, e.g.
+        `{"reply": "Chào!", "motion": "wave}` - malformed JSON that no amount
+        of careful extraction will parse. Measured 4-in-6 failures on one
+        prompt before this. So when JSON parsing fails, the two fields are
+        pulled out by regex, which doesn't care about the missing quote.
+
+    Returns (obj, prose); obj is None only if both routes fail. The prose is
+    returned separately because it's the spoken fallback and must never carry
+    the raw braces - the TTS reads them out loud otherwise.
+    """
+    brace = text.find("{")
+    prose = (text if brace == -1 else text[:brace]).strip()
+
+    for start in (i for i, ch in enumerate(text) if ch == "{"):
+        depth = 0
+        for end in range(start, len(text)):
+            if text[end] == "{":
+                depth += 1
+            elif text[end] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = json.loads(text[start:end + 1])
+                    except json.JSONDecodeError:
+                        break  # not valid; try the next opening brace
+                    if isinstance(obj, dict) and "reply" in obj:
+                        return obj, prose
+                    break
+
+    reply = re.search(r'"reply"\s*:\s*"(.*?)"\s*[,}]', text, re.DOTALL)
+    if reply:
+        motion = re.search(r'"motion"\s*:\s*"?([A-Za-z_\-]+)', text)
+        return {"reply": reply.group(1),
+                "motion": motion.group(1) if motion else "none"}, prose
+    return None, prose
+
+
 def generate_reply(heard_text):
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -76,19 +122,14 @@ def generate_reply(heard_text):
                               pad_token_id=tokenizer.eos_token_id)
     text = tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
 
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    # Fallback text (used whenever the model doesn't give a clean {"reply":
-    # ...} JSON) must never include the raw JSON braces - that gets spoken
-    # aloud verbatim by the TTS otherwise. Strip that portion out first.
-    prose = text[: match.start()].strip() if match else text.strip()
-    if not match:
-        return (prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), "none"
-    try:
-        obj = json.loads(match.group(0))
-    except json.JSONDecodeError:
+    obj, prose = extract_reply_json(text)
+    if obj is None:
+        # Log the raw generation - a silent fallback here was hiding a 2-in-3
+        # parse failure rate, which looked like the model refusing to answer.
+        print(f"  [unparsed LLM output] {text!r}", flush=True)
         return (prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), "none"
     reply = obj.get("reply", "").strip()
-    motion = obj.get("motion", "none").strip()
+    motion = str(obj.get("motion", "none")).strip()
     if motion not in EXISTING_MOTIONS + PROPOSED_MOTIONS:
         motion = "none"
     return (reply or prose or "Xin lỗi, tôi chưa nghĩ ra câu trả lời."), motion
