@@ -9,9 +9,11 @@ real signal on the right channel only, downsampled to 16kHz mono for output
 (wake-word training samples are expected at 16kHz).
 
 Usage: python collect_mira_samples.py [num_samples] [output_dir]
-Prompts "Say: Mira" N times, records a fixed 1.6s window each time (no
+Prompts "Say: Mira" N times, records a fixed 3.0s window each time (no
 manual start/stop - simpler for saying one word many times quickly),
-reports peak/rms so obviously-bad takes are visible immediately.
+reports peak/rms so obviously-bad takes are visible immediately, and rejects
+takes where speech still touches the end of the window (the word got cut
+off - see TAIL_GUARD_S below).
 """
 import subprocess
 import sys
@@ -30,7 +32,14 @@ FS = 16000
 CHANNELS = 2
 BYTES_PER_SAMPLE = 3
 RIGHT_CHANNEL = 1
-CLIP_S = 1.6
+# 1.6s was too short: measured onsets landed 0.42-1.26s into the clip and the
+# energy ran right up to the final frame, i.e. the tail of "Mira" was being cut
+# off. A wake-word model trained on clips missing their tail learns nothing
+# useful (the resulting model scored 0/40 recall on this speaker). 3s leaves
+# room for a late start and a full tail; the check below rejects takes whose
+# speech still touches the end of the window.
+CLIP_S = 3.0
+TAIL_GUARD_S = 0.25
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 40
 OUT_DIR = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("/home/arduino/mira_real_samples")
@@ -62,7 +71,8 @@ def save_wav(path, audio_i16, fs):
 
 
 print(f"Will record {N} samples of the word 'Mira' to {OUT_DIR}", flush=True)
-print("Say ONLY 'Mira' each time, right after the beep-less 'GO'. ~1.6s per take.\n", flush=True)
+print("Say ONLY 'Mira' each time, right after the beep-less 'GO'. ~3.0s per take - "
+      "no need to rush, just say it once naturally.\n", flush=True)
 
 kept = 0
 i = 0
@@ -105,6 +115,13 @@ while kept < N:
 
     if rms < 150:
         print("  too quiet, not saving - will retry this one", flush=True)
+        continue
+
+    tail = audio_i16[-int(TAIL_GUARD_S * FS):]
+    tail_rms = float(np.sqrt(np.mean(tail.astype(np.float64) ** 2))) if tail.size else 0.0
+    if tail_rms > rms * 0.35:
+        print(f"  speech still touching the end of the clip (tail_rms={tail_rms:.1f} vs "
+              f"overall {rms:.1f}) - likely cut off, will retry this one", flush=True)
         continue
 
     path = OUT_DIR / f"mira_real_{kept:03d}.wav"
