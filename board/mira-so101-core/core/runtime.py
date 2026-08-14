@@ -35,7 +35,9 @@ MOTION_ALIASES = {
     "nod": "motion_nod_yes",
     "no": "motion_shake_no",
     "shake": "motion_shake_no",
-    "clean": "motion_cleaning",
+    # "clean" (motion_cleaning) deliberately unregistered: it was a scripted
+    # fake of picking an object up, which the MolmoAct2 policy is meant to do
+    # for real. The recording is left on disk rather than deleted.
     "scan": "motion_scan_10s",
     "thinking": "motion_thinking",
     "shrug": "motion_shrug",

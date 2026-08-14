@@ -44,7 +44,7 @@ PIPER_MODEL = "/data/qualcom-robotic/piper-voices/vi_VN/vi_VN-vais1000-medium.on
 # moment a free-form remark is heard, to fill this server's own round-trip. If
 # the LLM could also pick it, it would arrive with the answer instead - after
 # the waiting it exists to cover.
-EXISTING_MOTIONS = ["wave", "dance", "nod", "shake", "play-dead", "clean", "scan",
+EXISTING_MOTIONS = ["wave", "dance", "nod", "shake", "play-dead", "scan",
                     "shrug", "point", "bow", "celebrate", "curious_tilt"]
 PROPOSED_MOTIONS = []  # all of docs/gesture_proposals.md is recorded now
 

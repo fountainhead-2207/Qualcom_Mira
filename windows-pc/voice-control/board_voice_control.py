@@ -104,7 +104,6 @@ WAKE_FUZZ = 0.6  # difflib ratio against "mira" for a single token or token pair
 COMMAND_MAP = {
     "vẫy tay": "wave", "quay tay": "wave", "bảy tay": "wave", "bẫy tay": "wave", "vẫy": "wave", "wave": "wave",
     "nhảy": "dance", "nháy": "dance", "múa": "dance", "mua": "dance", "dance": "dance",
-    "dọn dẹp": "clean", "dọn": "clean", "clean": "clean",
     "quét": "scan", "scan": "scan",
     "lắc đầu": "shake", "lắt đầu": "shake", "lắc đào": "shake", "lắc": "shake", "shake": "shake",
     "gật đầu": "nod", "gập đầu": "nod", "giật đầu": "nod", "gật": "nod", "nod": "nod",
