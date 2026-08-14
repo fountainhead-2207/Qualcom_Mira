@@ -40,8 +40,8 @@ PIPER_MODEL = "/data/qualcom-robotic/piper-voices/vi_VN/vi_VN-vais1000-medium.on
 # Existing canned motions plus the proposed-but-not-yet-recorded ones (see
 # docs/gesture_proposals.md) - the LLM is told which are real vs aspirational
 # so it can be steered toward "none" until those are recorded.
-EXISTING_MOTIONS = ["wave", "dance", "nod", "shake", "play-dead", "clean", "scan", "thinking"]
-PROPOSED_MOTIONS = ["shrug", "point", "bow", "celebrate", "curious_tilt"]
+EXISTING_MOTIONS = ["wave", "dance", "nod", "shake", "play-dead", "clean", "scan", "thinking", "shrug"]
+PROPOSED_MOTIONS = ["point", "bow", "celebrate", "curious_tilt"]
 
 SYSTEM_PROMPT = (
     "Bạn là Mira, một cánh tay robot thân thiện, trả lời ngắn gọn bằng tiếng Việt "

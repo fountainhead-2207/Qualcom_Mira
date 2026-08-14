@@ -38,10 +38,10 @@ MOTION_ALIASES = {
     "clean": "motion_cleaning",
     "scan": "motion_scan_10s",
     "thinking": "motion_thinking",
+    "shrug": "motion_shrug",
     # Add each of these only once its motion_<name>/ dataset actually exists -
     # mira-robot list eagerly loads every alias's dataset to show its
     # duration, so a name with no matching folder breaks the whole listing:
-    # "shrug": "motion_shrug",
     # "point": "motion_point",
     # "bow": "motion_bow",
     # "celebrate": "motion_celebrate",
