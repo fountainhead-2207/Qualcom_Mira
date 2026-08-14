@@ -27,6 +27,29 @@ Role: mid-tier compute (train/test policies locally with a GPU) and the operator
 ## Known constraint
 LeLab's live calibrate/teleoperate needs the physical arms plugged into whichever machine runs it. The arms are physically on the UNO Q board, not here — so LeLab on this PC is currently useful only for: viewing/training on datasets already recorded elsewhere, not live control. The Windows copy of the follower/leader calibration (`~/.cache/huggingface/lerobot/calibration/robots/so_follower/`, `.../teleoperators/so_leader/so.json`) was produced by LeLab calibration sessions done directly on this PC (arms were briefly connected here) — this is the source of the "fresh" leader calibration pushed to the board earlier, and of the `so_follower/c2.json` follower calibration synced to the board's `my_follower.json` on 2026-08-14 (after diagnosing that the bundled canned motions' amplitude drift was a calibration-mismatch issue, not a code bug — see `uno-q-board.md`).
 
+## Recording/recalibrating motions: use `lerobot-record` directly, not LeLab's web UI (2026-08-15)
+Re-recording "nod" (to fix its calibration drift) and recording the first new gesture ("thinking") through LeLab's own Record page hit two real bugs, both confirmed by reading LeLab's own source (`C:\Users\<user>\AppData\Roaming\uv\tools\lelab\Lib\site-packages\lelab\`):
+- **The dataset-name field silently strips `/` as you type it** (frontend bug), but the backend's `sanity_check_dataset_name` requires `repo_id.split("/")` to produce exactly 2 parts — so a plain name like `nod` crashes immediately with `ValueError: not enough values to unpack`.
+- **Any status/log line containing an emoji crashes** on this machine's default `cp1252` console encoding (`UnicodeEncodeError`), including ones inside the actual recording loop itself (`print(f"🎬 STATUS CHANGE: Starting recording phase...")` in `lelab/record.py`) — meaning a session could crash *before ever calling `record_loop()`*, so nothing was actually captured, while the UI just showed a stuck spinner with no useful error.
+
+**Fix**: launch LeLab (or `lerobot-record` directly) with `PYTHONIOENCODING=utf-8` in the environment — forces UTF-8 regardless of the console's codepage, and every emoji print stops crashing. For recording itself, bypass the web UI entirely and call the standalone CLI (installed as `lerobot-record.exe` inside LeLab's own venv, `...\lelab\Scripts\`):
+
+```
+PYTHONIOENCODING=utf-8 lerobot-record.exe ^
+  --robot.type=so101_follower --robot.port=COM8 --robot.id=c2 ^
+  --robot.calibration_dir="...\calibration\robots\so_follower" ^
+  --teleop.type=so101_leader --teleop.port=COM7 --teleop.id=c2 ^
+  --teleop.calibration_dir="...\calibration\teleoperators\so_leader" ^
+  --dataset.repo_id=mira/<name> --dataset.single_task="<description>" ^
+  --dataset.num_episodes=1 --dataset.episode_time_s=5 --dataset.reset_time_s=1 ^
+  --dataset.fps=30 --dataset.video=false --dataset.push_to_hub=false ^
+  --play_sounds=false --display_data=false
+```
+
+No keyboard interaction needed for a single episode — it just records for `episode_time_s` seconds and saves (unlike LeLab's own wrapper, which auto-discards and re-records if the timer runs out without an explicit "advance" signal — a LeLab-specific behavior, not standard `lerobot-record`). **Must stop any LeLab-side recording/teleoperation session first** (`POST /stop-recording`) — both processes fight over the same COM ports otherwise (`SerialException: could not open port 'COM8': PermissionError`). The CLI still timestamps `repo_id` the same way LeLab does; rename the resulting folder (strip the `_<timestamp>` suffix, e.g. `motion_thinking`) before deploying to the board.
+
+**Known artifact, not a calibration mismatch**: both "nod" and "thinking" recorded with a small, *constant* overshoot on `shoulder_lift.pos` only (~1.5-2.3% past the ±100 normalized bound, present in every one of the 150 frames, not a brief spike) — the board's `load_motion()` validation (`runtime.py`) rejects anything past ±100.001 and refuses to list *or* replay the motion at all until fixed. Root cause looks like the leader's calibrated `range_min` for that one joint being very slightly tighter than where it naturally sits during these motions, not a wrong calibration file. Fixed post-hoc by clipping the recorded parquet's `action` column to [-100, 100] (gripper to [0, 100]) rather than re-recording — a numpy one-liner, see the commit history for the exact script. Worth watching for on every new gesture recorded this way.
+
 **Recalibrating the board's arm without unplugging it from the board**: use the board's own `lerobot-calibrate`-equivalent instead of LeLab — LeLab pulls in heavy deps (`accelerate`, `datasets`, likely `torch`) unsuitable for the board's 2GB RAM. The board's `SO101Follower.calibrate()` method only needs `self.bus` (no camera/torch imports) and runs as a plain interactive SSH session. See `uno-q-board.md` for `calibrate_follower.py`.
 
 ## Voice command pipeline (wake-word "Mira" + open-vocabulary STT)
