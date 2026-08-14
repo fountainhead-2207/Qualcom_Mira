@@ -1,0 +1,128 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "mira-overview",
+    "title": "Mira Overview",
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "10s",
+    "time": { "from": "now-1h", "to": "now" },
+    "panels": [
+      {
+        "id": 1,
+        "type": "stat",
+        "title": "Overhead Camera Status",
+        "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+        "datasource": { "type": "prometheus", "uid": "cfv3bfegiqbr4e" },
+        "targets": [{ "expr": "camera_up{camera=\"overhead\"}", "refId": "A" }],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+            ],
+            "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "type": "stat",
+        "title": "Wrist Camera Status",
+        "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+        "datasource": { "type": "prometheus", "uid": "cfv3bfegiqbr4e" },
+        "targets": [{ "expr": "camera_up{camera=\"wrist\"}", "refId": "A" }],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "options": { "0": { "text": "DOWN (known HW failure)", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+            ],
+            "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "type": "timeseries",
+        "title": "Overhead Camera Last-Success Age (s)",
+        "gridPos": { "h": 6, "w": 12, "x": 12, "y": 0 },
+        "datasource": { "type": "prometheus", "uid": "cfv3bfegiqbr4e" },
+        "targets": [{ "expr": "time() - camera_last_success_timestamp_seconds{camera=\"overhead\"}", "refId": "A" }]
+      },
+      {
+        "id": 4,
+        "type": "timeseries",
+        "title": "MolmoAct2 Inference Latency (p50/p95)",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+        "datasource": { "type": "prometheus", "uid": "cfv3bfegiqbr4e" },
+        "targets": [
+          { "expr": "histogram_quantile(0.5, rate(molmoact2_infer_latency_seconds_bucket[5m]))", "refId": "A", "legendFormat": "p50" },
+          { "expr": "histogram_quantile(0.95, rate(molmoact2_infer_latency_seconds_bucket[5m]))", "refId": "B", "legendFormat": "p95" }
+        ]
+      },
+      {
+        "id": 5,
+        "type": "timeseries",
+        "title": "MolmoAct2 Requests (ok vs error)",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+        "datasource": { "type": "prometheus", "uid": "cfv3bfegiqbr4e" },
+        "targets": [
+          { "expr": "rate(molmoact2_infer_requests_total[5m])", "refId": "A", "legendFormat": "{{status}}" }
+        ]
+      },
+      {
+        "id": 6,
+        "type": "timeseries",
+        "title": "MolmoAct2 Warnings Rate",
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+        "datasource": { "type": "prometheus", "uid": "cfv3bfegiqbr4e" },
+        "targets": [
+          { "expr": "rate(molmoact2_infer_warnings_total[5m])", "refId": "A", "legendFormat": "{{kind}}" }
+        ]
+      },
+      {
+        "id": 7,
+        "type": "timeseries",
+        "title": "Wake-word Score (live)",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+        "datasource": { "type": "prometheus", "uid": "cfv3bfegiqbr4e" },
+        "fieldConfig": { "defaults": { "min": 0, "max": 1 } },
+        "targets": [
+          { "expr": "wakeword_score", "refId": "A", "legendFormat": "score" }
+        ]
+      },
+      {
+        "id": 8,
+        "type": "timeseries",
+        "title": "Command Audio Level (peak / RMS)",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+        "datasource": { "type": "prometheus", "uid": "cfv3bfegiqbr4e" },
+        "targets": [
+          { "expr": "command_audio_peak", "refId": "A", "legendFormat": "peak" },
+          { "expr": "command_audio_rms", "refId": "B", "legendFormat": "rms" }
+        ]
+      },
+      {
+        "id": 9,
+        "type": "timeseries",
+        "title": "Wake-word Triggers Rate",
+        "gridPos": { "h": 6, "w": 12, "x": 0, "y": 30 },
+        "datasource": { "type": "prometheus", "uid": "cfv3bfegiqbr4e" },
+        "targets": [
+          { "expr": "rate(wakeword_triggers_total[5m])", "refId": "A", "legendFormat": "triggers/s" }
+        ]
+      },
+      {
+        "id": 10,
+        "type": "timeseries",
+        "title": "Command Recognition Outcomes",
+        "gridPos": { "h": 6, "w": 12, "x": 12, "y": 30 },
+        "datasource": { "type": "prometheus", "uid": "cfv3bfegiqbr4e" },
+        "targets": [
+          { "expr": "rate(command_recognized_total[5m])", "refId": "A", "legendFormat": "{{motion}}" }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}

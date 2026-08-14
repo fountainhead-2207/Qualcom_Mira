@@ -1,0 +1,6 @@
+draccus==0.10.0
+deepdiff==8.6.1
+tqdm==4.67.1
+pyserial==3.5
+feetech-servo-sdk==1.0.0
+pyarrow==20.0.0

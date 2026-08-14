@@ -1,0 +1,44 @@
+model_name: "mira"
+
+target_phrase:
+  - "mira"
+
+custom_negative_phrases: []
+
+n_samples: 10000
+
+n_samples_val: 2000
+
+tts_batch_size: 200
+
+augmentation_batch_size: 200
+
+piper_sample_generator_path: "/data/qualcom-robotic/piper-sample-generator"
+
+output_dir: "/data/qualcom-robotic/mira_model"
+
+rir_paths: []
+
+background_paths: []
+
+background_paths_duplication_rate: []
+
+false_positive_validation_data_path: "/home/duyetnt2/openwakeword-negative-data/validation_set_features.npy"
+
+augmentation_rounds: 1
+
+feature_data_files:
+  "ACAV100M_sample": "/home/duyetnt2/openwakeword-negative-data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+
+batch_n_per_class:
+  "ACAV100M_sample": 1024
+  "adversarial_negative": 50
+  "positive": 50
+
+model_type: "dnn"
+layer_size: 128
+
+steps: 50000
+
+max_negative_weight: 1500
+target_false_positives_per_hour: 0.2

@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "board_camera_health"
+    static_configs:
+      - targets: ["192.168.1.41:9101"]
+        labels:
+          machine: "uno-q-board"
+
+  - job_name: "molmoact2_server"
+    static_configs:
+      - targets: ["127.0.0.1:8765"]
+        labels:
+          machine: "rtx4090"
+    metrics_path: /metrics
+
+  - job_name: "wakeword_whisper"
+    scrape_interval: 5s
+    static_configs:
+      - targets: ["127.0.0.1:9102"]
+        labels:
+          machine: "windows-pc"
