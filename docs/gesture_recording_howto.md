@@ -150,8 +150,12 @@ ssh 61.28.228.23 "tmux kill-session -t mira_chat 2>/dev/null; \
 
 ---
 
-## Còn phải ghi
+## Trạng thái hiện tại
 
-`point`, `bow`, `celebrate`, `curious_tilt` — xem `gesture_proposals.md` để biết mỗi cái nên trông như thế nào và tại sao cần nó. Đã xong: `thinking`, `shrug`, cùng với `nod` đã ghi lại theo calibration hiện tại.
+Đã ghi và duyệt xong toàn bộ 6 gesture trong `gesture_proposals.md`: `thinking`, `shrug`, `point`, `bow`, `celebrate`, `curious_tilt` — cộng với `nod` đã ghi lại theo calibration hiện tại. Board đang có 13 động tác (`mira-robot list` hiện 14 dòng vì `nod`/`yes` và `shake`/`no` là 2 tên gọi cho cùng 1 dataset; `play-dead` bị ẩn có chủ đích trong `run_list`).
 
-**Lưu ý**: 2 bản `thinking` và `shrug` ghi trước đó gần như không có chuyển động thật (do lệch thời gian giữa lúc báo và lúc thao tác), nên nên ghi lại cả 2 theo hướng dẫn này.
+Kinh nghiệm rút ra khi ghi, đáng lưu lại cho lần sau:
+
+- **Phải cho khớp vai (`lift`) hoặc khuỷu (`elbow`) tham gia.** Vài bản đầu chỉ vặn cổ tay — số liệu cho `lift`/`elbow` khoảng 0.0-0.1 và động tác trông rất nhạt dù phát lại vẫn "chạy". Lệnh kiểm tra biên độ ở Bước 2 phát hiện được ngay điều này.
+- **Tay giữ được tư thế cuối.** Dù `mira-robot` tắt torque khi disconnect, hộp giảm tốc của STS3215 vẫn giữ nguyên tư thế nếu bạn để nó cân bằng — nên kết thúc gesture ở một tư thế có ý nghĩa (như dáng suy tư) là hoàn toàn khả thi, không sợ sập.
+- **Động tác dài làm chậm phản hồi.** `thinking` dài 5s trong khi chat server chỉ mất ~1.5s, và `mira-robot` giữ khóa robot độc quyền — nên cử chỉ trả lời phải đợi hết 5s đó. Gesture càng ngắn thì Mira phản ứng càng liền mạch.
