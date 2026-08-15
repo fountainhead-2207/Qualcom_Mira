@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mira — bảng theo dõi</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --surface-0: #000000;
+    --surface-1: #101010;
+    --surface-2: #191918;
+    --border:    #2a2a27;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #8d8b81;
+    --accent:      #3987e5;
+    --good:     #0ca30c;
+    --warning:  #fab219;
+    --critical: #d03b3b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px;
+    background: var(--surface-0);
+    color: var(--text-primary);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--text-muted); font-size: 12.5px; }
+  .live { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-secondary); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
+  .dot.stale { background: var(--critical); }
+
+  .panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; }
+  .panel h2 {
+    font-size: 11.5px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--text-secondary); margin: 0 0 11px;
+  }
+
+  .top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 11px; }
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; }
+  .kpi .label { font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; }
+  .kpi .value { font-size: 32px; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; }
+  .kpi .unit { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-left: 3px; }
+  .kpi .foot { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
+
+  /* Audio meter: fill = live level, yellow tick = peak-hold that falls back
+     gradually, dashed rule = the board's own speech threshold (MIN_RMS). */
+  .meter-wrap { margin-top: 4px; }
+  .meter {
+    position: relative; height: 26px; border-radius: 6px;
+    background: var(--surface-2); overflow: hidden;
+  }
+  .meter .fill {
+    position: absolute; inset: 0 auto 0 0; width: 0;
+    background: var(--accent); border-radius: 6px;
+    transition: width 90ms linear, background 160ms linear;
+  }
+  .meter .fill.hot { background: var(--good); }
+  .meter .peak {
+    position: absolute; top: 0; bottom: 0; width: 2px; left: 0;
+    background: var(--warning); border-radius: 1px;
+    transition: left 90ms linear;
+  }
+  .meter .thresh {
+    position: absolute; top: 0; bottom: 0; width: 0;
+    border-left: 1px dashed var(--text-muted); opacity: .75;
+  }
+  .meter-legend {
+    display: flex; gap: 14px; margin-top: 6px;
+    font-size: 11.5px; color: var(--text-muted);
+  }
+  .meter-legend b { color: var(--text-secondary); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; vertical-align: baseline; }
+
+  .grid { display: grid; gap: 11px; margin-top: 11px; }
+  .cams { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .cam-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .cam-head h2 { margin: 0; }
+  .status { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; color: var(--text-secondary); }
+  .status.up .ico { color: var(--good); }
+  .status.down .ico { color: var(--critical); }
+  .cam-frame {
+    position: relative; width: 100%; aspect-ratio: 4 / 3;
+    background: #000; border-radius: 8px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cam-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  /* The arm camera is mounted upside-down; corrected here, not on the board. */
+  .cam-frame img.flip180 { transform: rotate(180deg); }
+  #cv-overlay {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  #cv-overlay text {
+    font: 3.2px ui-sans-serif, system-ui, sans-serif; font-weight: 700;
+    paint-order: stroke; stroke: rgba(0,0,0,.85); stroke-width: 1.1px;
+  }
+  .cv-age { font-size: 11.5px; color: var(--text-muted); }
+  .cam-frame .offline { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--text-muted); font-size: 12.5px; }
+  .cam-frame.is-offline .offline { display: flex; }
+
+  .bottom { grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); }
+  #transcript {
+    height: 300px; overflow-y: auto;
+    font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  #transcript div { padding: 1px 0; }
+  #transcript .heard  { color: #6e6c64; }
+  #transcript .meta   { color: #55534d; }
+  #transcript .plain  { color: var(--text-muted); }
+  /* A sentence that carried the wake word - the one thing worth spotting at a
+     glance in a wall of transcript. */
+  #transcript .wake   { color: var(--accent); font-weight: 700; }
+  #transcript .reply  { color: var(--good); font-weight: 600; }
+  #transcript .motion { color: var(--warning); font-weight: 600; }
+  #transcript .err    { color: var(--critical); }
+
+  .cmd-row { display: grid; grid-template-columns: 92px 1fr 34px; align-items: center; gap: 9px; margin-bottom: 7px; }
+  .cmd-row .name { font-size: 12.5px; color: var(--text-secondary); }
+  .cmd-row .bar { height: 7px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  .cmd-row .bar > i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+  .cmd-row .n { font-size: 12.5px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--text-muted); font-size: 12.5px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Mira — bảng theo dõi</h1>
+  <span class="sub">board 192.168.1.41 · số liệu 250ms · phiên âm 600ms</span>
+  <span class="live"><span class="dot" id="livedot"></span><span id="livetext">đang kết nối…</span></span>
+</header>
+
+<div class="top">
+  <section class="panel">
+    <h2>Mức âm thanh từ mic trên board</h2>
+    <div class="meter-wrap">
+      <div class="meter">
+        <div class="fill" id="m-fill"></div>
+        <div class="thresh" id="m-thresh"></div>
+        <div class="peak" id="m-peak"></div>
+      </div>
+      <div class="meter-legend">
+        <span>hiện tại <b id="m-now">–</b></span>
+        <span><span class="swatch" style="background:var(--warning)"></span> đỉnh <b id="m-peakval">–</b></span>
+        <span>ngưỡng nhận dạng <b>1000</b></span>
+        <span id="m-state">–</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Lệnh đã nhận</h2>
+    <div id="commands"><span class="empty">chưa có lệnh nào</span></div>
+  </section>
+</div>
+
+<section class="panel" style="margin-top:11px">
+  <div class="kpis">
+    <div class="kpi">
+      <div class="label">Số lần gọi "Mira"</div>
+      <div class="value" id="k-triggers">–</div>
+      <div class="foot">wake word nghe được</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Số lệnh khớp</div>
+      <div class="value" id="k-commands">–</div>
+      <div class="foot">động tác / chat đã chạy</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Độ trễ nhận dạng</div>
+      <div class="value" id="k-decode">–<span class="unit">ms</span></div>
+      <div class="foot">Zipformer, cửa sổ 1.0s</div>
+    </div>
+  </div>
+</section>
+
+<div class="grid cams">
+  <section class="panel">
+    <div class="cam-head">
+      <h2>Camera trên cao</h2>
+      <span class="cv-age" id="cv-age">CV: …</span>
+      <span class="status" id="s-overhead"><span class="ico">●</span><span class="txt">…</span></span>
+    </div>
+    <div class="cam-frame" id="f-overhead">
+      <img id="cam-overhead" alt="overhead camera">
+      <!-- MolmoAct2 detections, drawn over the live stream rather than baked
+           into it: the stream stays at full frame rate while detection updates
+           at its own much slower pace. Both source and frame are 4:3, so
+           percentage coordinates land where the model meant them. -->
+      <svg id="cv-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+      <div class="offline">không có tín hiệu</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="cam-head">
+      <h2>Camera trên tay máy</h2>
+      <span class="status" id="s-wrist"><span class="ico">●</span><span class="txt">…</span></span>
+    </div>
+    <div class="cam-frame" id="f-wrist">
+      <img id="cam-wrist" class="flip180" alt="wrist camera">
+      <div class="offline">không có tín hiệu</div>
+    </div>
+  </section>
+</div>
+
+<div class="grid bottom">
+  <section class="panel">
+    <h2>Phiên âm trực tiếp</h2>
+    <div id="transcript"><span class="empty">đang tải…</span></div>
+  </section>
+  <section class="panel">
+    <h2>Chú giải màu</h2>
+    <div style="font-size:12.5px; line-height:1.9">
+      <div><span style="color:var(--accent);font-weight:700">■ câu có gọi "Mira"</span></div>
+      <div><span style="color:var(--good);font-weight:600">■ Mira trả lời</span></div>
+      <div><span style="color:var(--warning);font-weight:600">■ chạy động tác</span></div>
+      <div><span style="color:var(--critical)">■ lỗi (loa, mạng…)</span></div>
+      <div><span style="color:var(--text-muted)">■ câu không có tên gọi</span></div>
+      <div><span style="color:#6e6c64">■ mảnh nghe được / số đo</span></div>
+    </div>
+  </section>
+</div>
+
+<script>
+// Cameras are served by the board. When this page is served BY the board,
+// use whatever host the phone typed; otherwise fall back to the board IP.
+const BOARD = (location.hostname && location.hostname !== "localhost"
+               && location.hostname !== "127.0.0.1")
+  ? location.hostname : "192.168.1.41";
+const CAMS  = { overhead: 8080, wrist: 8081 };
+const STATE_MS = 250;      // board updates board_audio_rms every HOP_S = 0.5s
+const LOG_MS   = 600;      // a sentence can close after 1.0s, so poll under that
+const RMS_SCALE  = 3000;   // speech sits well above the threshold; room noise ~50
+const RMS_THRESH = 1000;   // MIN_RMS in board_voice_control.py
+// Peak-hold fall rate, in RMS units per second - slow enough to read, fast
+// enough to follow speech.
+const PEAK_FALL = RMS_SCALE / 1.6;
+
+for (const [name, port] of Object.entries(CAMS)) {
+  const img = document.getElementById("cam-" + name);
+  const frame = document.getElementById("f-" + name);
+  img.onerror = () => frame.classList.add("is-offline");
+  img.onload  = () => frame.classList.remove("is-offline");
+  img.src = `http://${BOARD}:${port}/stream`;
+}
+document.getElementById("m-thresh").style.left = (RMS_THRESH / RMS_SCALE * 100) + "%";
+
+const fmt = (v, d = 0) => v === null || v === undefined ? "–"
+  : v.toLocaleString("vi-VN", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+let peak = 0, peakAt = performance.now();
+
+function drawMeter(rms) {
+  const now = performance.now();
+  const dt = (now - peakAt) / 1000;
+  peakAt = now;
+  peak = Math.max(rms, peak - PEAK_FALL * dt, 0);
+
+  const pct = v => Math.max(0, Math.min(100, (v / RMS_SCALE) * 100));
+  const fill = document.getElementById("m-fill");
+  fill.style.width = pct(rms) + "%";
+  fill.classList.toggle("hot", rms >= RMS_THRESH);
+  document.getElementById("m-peak").style.left = pct(peak) + "%";
+  document.getElementById("m-now").textContent = fmt(rms);
+  document.getElementById("m-peakval").textContent = fmt(peak);
+  document.getElementById("m-state").textContent =
+    rms === 0 ? "im lặng tuyệt đối — kiểm tra mic"
+    : rms >= RMS_THRESH ? "đang nghe thấy tiếng nói" : "dưới ngưỡng (im)";
+}
+
+function setStatus(el, up) {
+  el.className = "status " + (up ? "up" : "down");
+  el.querySelector(".txt").textContent = up ? "đang chạy" : "mất tín hiệu";
+}
+
+async function refreshState() {
+  const r = await fetch("/api/state");
+  const s = await r.json();
+  if (!s.ok) throw new Error(s.error || "board không trả lời");
+
+  const v = s.voice || {};
+  drawMeter(v.board_audio_rms ?? 0);
+  document.getElementById("k-triggers").textContent = fmt(v.board_voice_triggers_total);
+  document.getElementById("k-decode").innerHTML = fmt(v.board_decode_ms) + '<span class="unit">ms</span>';
+
+  const cams = (s.camera || {}).camera_up || {};
+  for (const name of Object.keys(CAMS)) {
+    const el = document.getElementById("s-" + name);
+    if (el) setStatus(el, cams[name] === 1);
+  }
+
+  const rows = Object.entries(v.board_voice_recognized_total || {})
+    .map(([motion, n]) => ({ motion, n })).sort((a, b) => b.n - a.n);
+  document.getElementById("k-commands").textContent = fmt(rows.reduce((t, r) => t + r.n, 0));
+  const max = Math.max(1, ...rows.map(r => r.n));
+  document.getElementById("commands").innerHTML = rows.length
+    ? rows.map(r => `<div class="cmd-row"><span class="name">${r.motion}</span>` +
+        `<span class="bar"><i style="width:${r.n / max * 100}%"></i></span>` +
+        `<span class="n">${r.n}</span></div>`).join("")
+    : '<span class="empty">chưa có lệnh nào</span>';
+}
+
+const esc = s => s.replace(/[<&]/g, c => c === "<" ? "&lt;" : "&amp;");
+
+/* The board marks the moment it hears the wake word with [WAKE] on that line,
+   and a matched command word with cmd=<motion>. A finished sentence line says
+   nothing on its own, though - the board prints "(không có tên gọi - bỏ qua)"
+   on the NEXT line when the wake word was missing, so that one needs a line of
+   lookahead rather than a per-line test. */
+function classify(lines) {
+  return lines.map((line, i) => {
+    if (line.includes("Mira:")) return "reply";
+    if (line.includes(">>>") || line.includes("cmd=")) return "motion";
+    if (/KHÔNG PHÁT ĐƯỢC|lỗi|error|Traceback/i.test(line)) return "err";
+    if (line.includes("[WAKE]")) return "wake";
+    if (line.includes("=== CÂU")) {
+      const next = lines[i + 1] || "";
+      return next.includes("không có tên gọi") ? "plain" : "wake";
+    }
+    if (line.includes("Motion complete")) return "reply";
+    if (line.includes("heard:")) return "heard";
+    if (line.includes("[đo]")) return "meta";
+    return "plain";
+  });
+}
+
+async function refreshLog() {
+  const r = await fetch("/api/log?n=120");
+  const { lines } = await r.json();
+  const box = document.getElementById("transcript");
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  const kinds = classify(lines);
+  box.innerHTML = lines.map((l, i) => `<div class="${kinds[i]}">${esc(l)}</div>`).join("");
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+const CV_COLORS = ["#3987e5", "#0ca30c", "#fab219", "#e87ba4", "#d03b3b"];
+const SVGNS = "http://www.w3.org/2000/svg";
+
+function svgEl(name, attrs) {
+  const el = document.createElementNS(SVGNS, name);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+async function refreshDetections() {
+  const r = await fetch("/api/detections");
+  const d = await r.json();
+  const svg = document.getElementById("cv-overlay");
+  svg.textContent = "";
+
+  document.getElementById("cv-age").textContent =
+    d.error ? "CV: lỗi"
+    : d.age_s === null ? "CV: đang chờ vòng đầu"
+    : `CV: ${d.detections.length} vật · ${d.ms}ms · ${d.age_s.toFixed(0)}s trước`;
+
+  d.detections.forEach((det, i) => {
+    const color = CV_COLORS[i % CV_COLORS.length];
+    const x = det.x * 100, y = det.y * 100;
+    if (det.box) {
+      const [x1, y1, x2, y2] = det.box.map(v => v * 100);
+      svg.appendChild(svgEl("rect", {
+        x: x1, y: y1, width: Math.max(0.5, x2 - x1), height: Math.max(0.5, y2 - y1),
+        fill: "none", stroke: color, "stroke-width": 0.6, rx: 1 }));
+    } else {
+      // No box for this object - a crosshair reads as "a located point",
+      // where a circle would imply an extent the model never gave.
+      svg.appendChild(svgEl("circle", {
+        cx: x, cy: y, r: 2.2, fill: "none", stroke: color, "stroke-width": 0.7 }));
+      svg.appendChild(svgEl("line", {
+        x1: x - 3.6, y1: y, x2: x + 3.6, y2: y, stroke: color, "stroke-width": 0.4 }));
+      svg.appendChild(svgEl("line", {
+        x1: x, y1: y - 3.6, x2: x, y2: y + 3.6, stroke: color, "stroke-width": 0.4 }));
+    }
+    const label = svgEl("text", { x: Math.min(x + 4, 74), y: Math.max(y - 3, 4), fill: color });
+    label.textContent = det.label;
+    svg.appendChild(label);
+  });
+}
+
+function mark(ok, msg) {
+  document.getElementById("livedot").className = "dot" + (ok ? "" : " stale");
+  document.getElementById("livetext").textContent = msg;
+}
+
+async function tickState() {
+  try {
+    await refreshState();
+    mark(true, "cập nhật " + new Date().toLocaleTimeString("vi-VN"));
+  } catch (e) { mark(false, "lỗi: " + e.message); }
+}
+
+tickState(); refreshLog(); refreshDetections().catch(() => {});
+setInterval(tickState, STATE_MS);
+setInterval(() => refreshLog().catch(() => {}), LOG_MS);
+// Detection rounds take seconds on the GPU; polling faster only re-reads the
+// same cached round.
+setInterval(() => refreshDetections().catch(() => {}), 2000);
+</script>
+</body>
+</html>
