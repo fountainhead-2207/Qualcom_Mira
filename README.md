@@ -33,10 +33,13 @@ for what each machine actually costs in measured milliseconds.
   - `start_mira.sh` — brings up everything the board runs, in dependency order.
     Nothing on the board survives a reboot except `bluetooth.service`, so this is
     the first thing to run after one.
-- `windows-pc/voice-control/` — the wake-word → STT → motion pipeline.
-  `board_voice_control.py` is the production path and runs natively on the board;
-  `board_wakeword.py` and `wakeword_to_whisper.py` are retired earlier builds
-  kept for reference.
+- `windows-pc/voice-control/` — the voice pipeline. `board_voice_control.py` is
+  the production path and runs natively on the board: one Zipformer model
+  transcribes continuously, and a trigger needs the wake word *and* a command in
+  the same utterance, matched fuzzily because a Vietnamese ASR mangles the
+  foreign name "Mira". `board_wakeword.py` and `wakeword_to_whisper.py` are the
+  retired two-stage design (a separate wake-word model feeding a command window)
+  and are kept only for reference.
 - `windows-pc/monitoring/` — the live dashboard.
   - `live_dashboard.html` + `dashboard_server.py` — camera streams, wake/command
     counters, a peak-hold audio meter, and the live transcript. Runs on the PC,
@@ -59,7 +62,7 @@ for what each machine actually costs in measured milliseconds.
 
 | | status |
 |---|---|
-| Wake word + Vietnamese ASR, on-device | ✅ 189ms, no network hop |
+| Vietnamese ASR with fuzzy wake-word match, on-device | ✅ 189ms, no network hop |
 | Canned motions from voice | ✅ 13 recorded gestures |
 | Conversation (LLM + TTS + Bluetooth speaker) | ✅ 0.47–1.04s round trip, 95% on 86 eval cases |
 | Object recognition by name | ✅ ~1s per object, drawn live on the dashboard |
@@ -98,6 +101,17 @@ TTS running on the board's own CPU (`board/mira_chat_local.py`).
 | Vision | none |
 | Grasping | no |
 
+```mermaid
+flowchart LR
+    MIC["mic"] --> ASR["Zipformer-30M int8<br>continuous transcript<br>189ms"]
+    ASR --> MATCH{"wake word<br>+ command<br>in one utterance?"}
+    MATCH -- "matched" --> ARM["SO-101 arm<br>13 canned motions"]
+    MATCH -- "no match" --> LLM["Qwen2.5-0.5B Q4_0<br>llama.cpp, 4 threads"]
+    LLM -- "reply" --> TTS["Piper TTS"] --> SPK["Bluetooth speaker"]
+    LLM -- "gesture" --> ARM
+    CAM["2 cameras<br>25fps"] --> DASH["dashboard :8088"]
+```
+
 `Q4_0` is not a typo for the more common `Q4_K_M` — it measured *faster* on this
 CPU (llama.cpp repacks it for ARM) at a smaller size. Full table in
 [`docs/benchmarks_board_vs_server.md`](docs/benchmarks_board_vs_server.md).
@@ -131,33 +145,36 @@ cards you have to stop running both models at full precision:
 The 12GB and 8GB rows are arithmetic, not benchmarks. Everything else in this
 repo is measured; treat those two as a plan to verify, not a result.
 
-Full diagrams, including the network constraints that force this shape (the board
-cannot reach the internet except on port 443; the rented server cannot reach the
-home LAN at all), are in [`docs/architecture.md`](docs/architecture.md).
-
 ```mermaid
 flowchart LR
-    subgraph BOARD["UNO Q board — both pipelines"]
-        MIC["mic"] --> ASR["Zipformer ASR<br>189ms"]
-        ASR --> MATCH{"command<br>matched?"}
-        MATCH -- "yes" --> ARM["SO-101 arm"]
-        CAMS["2 cameras<br>25fps"]
+    subgraph BOARD["UNO Q board"]
+        MIC["mic"] --> ASR["Zipformer-30M int8<br>189ms"]
+        ASR --> MATCH{"wake word<br>+ command?"}
+        MATCH -- "matched" --> ARM["SO-101 arm"]
+        CAM["2 cameras<br>25fps"]
     end
 
-    subgraph P1["Pipeline 1 — on-board only"]
-        LOCAL["Qwen2.5-0.5B Q4_0<br>+ Piper TTS<br>403MB, on CPU"]
+    subgraph PC["Linux PC — LAN bridge"]
+        TUN["SSH tunnel :8766"]
+        DASH["dashboard :8090"]
     end
 
-    subgraph P2["Pipeline 2 — consumer GPU on the LAN"]
-        LLM["Qwen3-4B FP8<br>0.33–0.60s · 9.6GB"]
-        VIS["MolmoAct2<br>~1s/object · 10.9GB"]
+    subgraph GPU["GPU box"]
+        LLM["Qwen3-4B FP8, vLLM<br>0.33–0.60s · 9.6GB"]
+        VIS["MolmoAct2 vision<br>0.84–1.63s · 10.9GB"]
         MAP["image→joint map"]
     end
 
-    MATCH -- "no" --> LOCAL -- "reply" --> ARM
-    MATCH -- "no" --> LLM -- "reply + gesture" --> ARM
-    CAMS --> VIS -- "object xy" --> MAP -. "grasp" .-> ARM
+    MATCH -- "no match" --> TUN --> LLM
+    LLM -- "reply + gesture" --> ARM
+    CAM --> DASH --> VIS
+    VIS -- "object xy" --> MAP -. "grasp" .-> ARM
 ```
+
+The board cannot reach the internet except on port 443, and the GPU box cannot
+reach the home LAN at all — which is why the PC sits in the middle as a bridge
+rather than the board talking to the GPU directly. Full diagrams and the
+reasoning are in [`docs/architecture.md`](docs/architecture.md).
 
 ## Running it
 
@@ -216,6 +233,5 @@ Pipeline 1's two services are started separately, as shown above.
 
 ## Not included
 
-Virtualenvs, HuggingFace/model caches, the openWakeWord training data, and the
-MolmoAct2 checkpoint are excluded — see `docs/gpu-training-server.md` and
+Virtualenvs, HuggingFace/model caches, and the MolmoAct2 checkpoint are excluded — see `docs/gpu-training-server.md` and
 `docs/uno-q-board.md` for how to regenerate or fetch them.
