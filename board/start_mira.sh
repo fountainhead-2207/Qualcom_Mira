@@ -46,12 +46,24 @@ start_one() {
 [ "$MODE" = "restart" ] && { echo "dừng hết..."; stop_all; }
 
 echo "=== camera ==="
+# Gán theo ID THIẾT BỊ, không theo /dev/videoN. Số thứ tự phụ thuộc thứ tự cắm:
+# một lần cắm cam tay máy trước, nó chiếm video0 và hai camera đổi chỗ cho nhau -
+# bảng theo dõi hiện cam tay máy trong ô "trên cao" và ngược lại, trông y như
+# camera hỏng. Symlink trong /dev/v4l/by-id/ thì gắn với chính thiết bị.
+OVERHEAD=/dev/v4l/by-id/usb-Generic_HD_video_20210901000000-video-index0
+WRIST=/dev/v4l/by-id/usb-Generic_USB_Camera_200901010001-video-index0
+
 # NOOP = đẩy thẳng MJPEG gốc của camera, không nén lại bằng CPU. Đo được:
 # 8fps -> 25fps, và board không tốn CPU cho việc mã hoá.
-start_one "ustreamer trên cao :8080" "ustreamer --device=/dev/video0" \
-    "ustreamer --device=/dev/video0 --format=MJPEG --encoder=NOOP --resolution=640x480 --desired-fps=30 --host=0.0.0.0 --port=8080 > /home/arduino/ustreamer.log 2>&1" 4
-start_one "ustreamer tay máy :8081" "ustreamer --device=/dev/video2" \
-    "ustreamer --device=/dev/video2 --format=MJPEG --encoder=NOOP --resolution=640x480 --desired-fps=30 --host=0.0.0.0 --port=8081 > /home/arduino/ustreamer_wrist.log 2>&1" 4
+for cam in "trên cao|$OVERHEAD|8080|ustreamer.log" "tay máy|$WRIST|8081|ustreamer_wrist.log"; do
+    IFS='|' read -r label dev port log <<< "$cam"
+    if [ ! -e "$dev" ]; then
+        say "ustreamer $label :$port" "KHÔNG THẤY CAMERA (chưa cắm?)"
+        continue
+    fi
+    start_one "ustreamer $label :$port" "port=$port" \
+        "ustreamer --device=$dev --format=MJPEG --encoder=NOOP --resolution=640x480 --desired-fps=30 --host=0.0.0.0 --port=$port > /home/arduino/$log 2>&1" 4
+done
 
 echo "=== theo dõi ==="
 # Sau ustreamer: exporter kiểm tra camera bằng cách gọi /snapshot, chạy trước

@@ -147,7 +147,7 @@
       <div class="meter-legend">
         <span>hiện tại <b id="m-now">–</b></span>
         <span><span class="swatch" style="background:var(--warning)"></span> đỉnh <b id="m-peakval">–</b></span>
-        <span>ngưỡng nhận dạng <b>1000</b></span>
+        <span>ngưỡng nhận dạng <b>2000</b></span>
         <span id="m-state">–</span>
       </div>
     </div>
@@ -237,7 +237,9 @@ const CAMS  = { overhead: 8080, wrist: 8081 };
 const STATE_MS = 250;      // board updates board_audio_rms every HOP_S = 0.5s
 const LOG_MS   = 600;      // a sentence can close after 1.0s, so poll under that
 const RMS_SCALE  = 3000;   // speech sits well above the threshold; room noise ~50
-const RMS_THRESH = 1000;   // MIN_RMS in board_voice_control.py
+const RMS_THRESH = 2000;   // MIN_RMS in board_voice_control.py
+                           // (nâng 1000 -> 2000 ngày 16/08 vì phòng thi ồn:
+                           //  ồn nền đo được 532, giọng nói 2551)
 // Peak-hold fall rate, in RMS units per second - slow enough to read, fast
 // enough to follow speech.
 const PEAK_FALL = RMS_SCALE / 1.6;

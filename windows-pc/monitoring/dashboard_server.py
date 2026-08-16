@@ -25,7 +25,10 @@ import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-BOARD = os.environ.get("MIRA_BOARD", "192.168.1.41")
+# Mira.local (mDNS) thay vì IP cứng: board đổi IP mỗi lần đổi mạng, và một
+# lần khởi động lại quên đặt MIRA_BOARD là bảng theo dõi trỏ vào IP nhà cũ
+# rồi báo "ok: False" trông y như board đã chết.
+BOARD = os.environ.get("MIRA_BOARD", "Mira.local")
 VOICE_METRICS = f"http://{BOARD}:9103/metrics"   # board_voice_control.py
 CAMERA_METRICS = f"http://{BOARD}:9101/metrics"  # camera_exporter.py
 LOG_URL = f"http://{BOARD}:9104/log"             # log_tail_server.py
