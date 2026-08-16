@@ -4,6 +4,10 @@ Three machines: an Arduino UNO Q board (2GB RAM, aarch64) running the arm and th
 full voice pipeline, a Linux PC used for monitoring and as the LAN bridge, and a
 rented RTX 4090 used for the conversational LLM, TTS, and MolmoAct2 inference.
 
+The 4090 is rented, but nothing here needs a rented card — see
+[**Two ways to run this**](#two-ways-to-run-this) for the on-board-only pipeline
+and the consumer-GPU VRAM tiers.
+
 Start here: **[`docs/architecture.md`](docs/architecture.md)** for how the two
 pipelines fit together, and **[`docs/benchmarks_board_vs_server.md`](docs/benchmarks_board_vs_server.md)**
 for what each machine actually costs in measured milliseconds.
@@ -74,55 +78,141 @@ is flat and the arm base does not move, so what is unknown is a single 2D map
 from image coordinates to the joint angles that put the gripper above that point
 — measurable by driving the arm through ~16 known poses and photographing each.
 
-## Architecture
+## Two ways to run this
 
-Two pipelines share the hardware. The voice one is in daily use; the vision one
-sees but cannot yet act. Full diagrams, including the network constraints that
-force this shape (the board cannot reach the internet except on port 443; the
-rented server cannot reach the home LAN at all), are in
-[`docs/architecture.md`](docs/architecture.md).
+Pick by the hardware you have. Both drive the same arm and the same 13 canned
+motions; they differ in where the language and vision models run, and therefore
+in what the robot can say and see.
+
+### Pipeline 1 — end-to-end on the board
+
+Everything on the UNO Q. No PC, no server, no network beyond the LAN. Mic → ASR
+→ command match → arm, and for anything the matcher misses, a 0.5B LLM and Piper
+TTS running on the board's own CPU (`board/mira_chat_local.py`).
+
+| | |
+|---|---|
+| Hardware | UNO Q board (2GB RAM, aarch64) — nothing else |
+| LLM | Qwen2.5-0.5B **Q4_0**, 403MB, 20.09 tok/s prefill · 11.89 tok/s decode |
+| ASR | Zipformer-30M int8, 189ms |
+| Vision | none |
+| Grasping | no |
+
+`Q4_0` is not a typo for the more common `Q4_K_M` — it measured *faster* on this
+CPU (llama.cpp repacks it for ARM) at a smaller size. Full table in
+[`docs/benchmarks_board_vs_server.md`](docs/benchmarks_board_vs_server.md).
+
+The catch is quality, not speed. A 0.5B model answers, but not at the level the
+86-case eval expects, and `cache_prompt` is mandatory — without it the 1231-token
+system prompt costs ~70s per turn on this CPU and the pipeline is unusable.
+
+### Pipeline 2 — board + a consumer GPU
+
+The board keeps mic, ASR, arm and cameras. A GPU box on the same LAN runs the
+conversational LLM and the vision model. This is the path that can grasp,
+because it is the only one that produces object coordinates.
+
+| | measured on RTX 4090 (24.5GB) |
+|---|---|
+| LLM | Qwen3-4B-Instruct-2507 **FP8** via vLLM — 0.33–0.60s, **9.6GB VRAM** |
+| Vision | MolmoAct2 — 0.84–1.63s per object, **10.9GB VRAM** |
+| Both resident | **20.5GB** |
+| Grasping | yes, once the image→joint calibration map is in place |
+
+**VRAM tiers.** 20.5GB is why the current box is a 24GB card. To fit smaller
+cards you have to stop running both models at full precision:
+
+| Card | How | Status |
+|---|---|---|
+| **24GB** | FP8 LLM + MolmoAct2, both resident | ✅ measured |
+| **12GB** | 4-bit LLM (AWQ/GPTQ) + 4-bit MolmoAct2, both resident | ⚠️ estimated ~8–9GB, **not yet measured** |
+| **8GB** | every large model at its smallest quant, and load LLM/vision **one at a time** | ⚠️ estimated, **not yet measured** |
+
+The 12GB and 8GB rows are arithmetic, not benchmarks. Everything else in this
+repo is measured; treat those two as a plan to verify, not a result.
+
+Full diagrams, including the network constraints that force this shape (the board
+cannot reach the internet except on port 443; the rented server cannot reach the
+home LAN at all), are in [`docs/architecture.md`](docs/architecture.md).
 
 ```mermaid
 flowchart LR
-    subgraph BOARD["UNO Q board"]
+    subgraph BOARD["UNO Q board — both pipelines"]
         MIC["mic"] --> ASR["Zipformer ASR<br>189ms"]
-        ASR --> MATCH{"khớp lệnh?"}
-        MATCH -- "có" --> ARM["SO-101 arm"]
+        ASR --> MATCH{"command<br>matched?"}
+        MATCH -- "yes" --> ARM["SO-101 arm"]
         CAMS["2 cameras<br>25fps"]
     end
-    subgraph PC["Linux PC"]
-        BRIDGE["ssh tunnel + bảng theo dõi"]
+
+    subgraph P1["Pipeline 1 — on-board only"]
+        LOCAL["Qwen2.5-0.5B Q4_0<br>+ Piper TTS<br>403MB, on CPU"]
     end
-    subgraph SRV["RTX 4090"]
-        LLM["Qwen3-4B FP8<br>0.45s"]
-        VIS["MolmoAct2 vision<br>~1s/vật"]
+
+    subgraph P2["Pipeline 2 — consumer GPU on the LAN"]
+        LLM["Qwen3-4B FP8<br>0.33–0.60s · 9.6GB"]
+        VIS["MolmoAct2<br>~1s/object · 10.9GB"]
+        MAP["image→joint map"]
     end
-    MATCH -- "không" --> BRIDGE --> LLM -- "reply + gesture" --> ARM
-    CAMS --> BRIDGE --> VIS -- "toạ độ vật" --> BRIDGE
+
+    MATCH -- "no" --> LOCAL -- "reply" --> ARM
+    MATCH -- "no" --> LLM -- "reply + gesture" --> ARM
+    CAMS --> VIS -- "object xy" --> MAP -. "grasp" .-> ARM
 ```
 
 ## Running it
 
-After a board reboot:
+Common to both pipelines, after a board reboot — nothing on the board survives
+one except `bluetooth.service`:
 
 ```bash
 ssh mira-board '~/start_mira.sh'          # cameras, exporters, dashboard, speaker, voice
 ```
 
+Dashboard from a phone, no PC needed: `http://<board-ip>:8088`.
+
+### Pipeline 1 — on-board only
+
+Not started by `start_mira.sh` yet; run it by hand on the board. `cache_prompt`
+is what makes this viable at all:
+
+```bash
+/llm/llama-b10444/llama-server -m /llm/qwen2.5-0.5b-instruct-q4_0.gguf \
+    -t 4 -c 2048 --host 127.0.0.1 --port 8099 &
+python3 ~/mira_chat_local.py              # serves /chat on :8770
+```
+
+Needs on the board: `/llm/llama-b10444/llama-server`,
+`qwen2.5-0.5b-instruct-q4_0.gguf`, the Piper voice
+`vi_VN-vais1000-medium.onnx`, and both prompt files `/llm/mira_sys.txt` +
+`/llm/mira_fewshot.txt`.
+
+### Pipeline 2 — board + GPU box
+
 On the Linux PC (needs the GlobalProtect VPN up for anything server-side):
 
 ```bash
-ssh -N -L 192.168.1.48:8766:localhost:8766 -p 234 mira-4090 &   # chat path for the board
+ssh -N -L $PC_LAN_IP:8766:localhost:8766 gpu-box &   # chat path for the board
 cd windows-pc/monitoring && python3 dashboard_server.py          # http://localhost:8090
 ```
 
-On the 4090:
+On the GPU box:
 
 ```bash
 cd /data/qualcom-robotic && ./start_mira_stack.sh    # vLLM + chat server
 ```
 
-Dashboard from a phone, no PC needed: `http://192.168.1.41:8088`.
+### Switching between the two
+
+`board_voice_control.py` posts to a single `CHAT_SERVER_URL` constant. Point it at
+whichever chat backend you are running:
+
+| Pipeline | `CHAT_SERVER_URL` |
+|---|---|
+| 1 — on-board | `http://127.0.0.1:8770/chat` |
+| 2 — GPU box | `http://<pc-lan-ip>:8766/chat` |
+
+`start_mira.sh` brings up cameras, exporters, dashboard, speaker and voice.
+Pipeline 1's two services are started separately, as shown above.
 
 ## Not included
 
