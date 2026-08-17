@@ -101,16 +101,10 @@ TTS running on the board's own CPU (`board/mira_chat_local.py`).
 | Vision | none |
 | Grasping | no |
 
-```mermaid
-flowchart LR
-    MIC["mic"] --> ASR["Zipformer-30M int8<br>continuous transcript<br>189ms"]
-    ASR --> MATCH{"wake word<br>+ command<br>in one utterance?"}
-    MATCH -- "matched" --> ARM["SO-101 arm<br>13 canned motions"]
-    MATCH -- "no match" --> LLM["Qwen2.5-0.5B Q4_0<br>llama.cpp, 4 threads"]
-    LLM -- "reply" --> TTS["Piper TTS"] --> SPK["Bluetooth speaker"]
-    LLM -- "gesture" --> ARM
-    CAM["2 cameras<br>25fps"] --> DASH["dashboard :8088"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/pipeline1-dark.svg">
+  <img alt="Pipeline 1 — everything runs on the UNO Q board" src="docs/img/pipeline1-light.svg" width="100%">
+</picture>
 
 `Q4_0` is not a typo for the more common `Q4_K_M` — it measured *faster* on this
 CPU (llama.cpp repacks it for ARM) at a smaller size. Full table in
@@ -145,31 +139,10 @@ cards you have to stop running both models at full precision:
 The 12GB and 8GB rows are arithmetic, not benchmarks. Everything else in this
 repo is measured; treat those two as a plan to verify, not a result.
 
-```mermaid
-flowchart LR
-    subgraph BOARD["UNO Q board"]
-        MIC["mic"] --> ASR["Zipformer-30M int8<br>189ms"]
-        ASR --> MATCH{"wake word<br>+ command?"}
-        MATCH -- "matched" --> ARM["SO-101 arm"]
-        CAM["2 cameras<br>25fps"]
-    end
-
-    subgraph PC["Linux PC — LAN bridge"]
-        TUN["SSH tunnel :8766"]
-        DASH["dashboard :8090"]
-    end
-
-    subgraph GPU["GPU box"]
-        LLM["Qwen3-4B FP8, vLLM<br>0.33–0.60s · 9.6GB"]
-        VIS["MolmoAct2 vision<br>0.84–1.63s · 10.9GB"]
-        MAP["image→joint map"]
-    end
-
-    MATCH -- "no match" --> TUN --> LLM
-    LLM -- "reply + gesture" --> ARM
-    CAM --> DASH --> VIS
-    VIS -- "object xy" --> MAP -. "grasp" .-> ARM
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/pipeline2-dark.svg">
+  <img alt="Pipeline 2 — board, Linux PC bridge and GPU box" src="docs/img/pipeline2-light.svg" width="100%">
+</picture>
 
 The board cannot reach the internet except on port 443, and the GPU box cannot
 reach the home LAN at all — which is why the PC sits in the middle as a bridge
