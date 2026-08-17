@@ -66,7 +66,6 @@ for what each machine actually costs in measured milliseconds.
 | Canned motions from voice | ✅ 13 recorded gestures |
 | Conversation (LLM + TTS + Bluetooth speaker) | ✅ 0.47–1.04s round trip, 95% on 86 eval cases |
 | Object recognition by name | ✅ ~1s per object, drawn live on the dashboard |
-| **Picking objects up** | ❌ blocked on one missing link — see below |
 | Whole pipeline on the board alone | ❌ quality, not speed — see benchmarks |
 
 The manipulation chain is three-quarters built: speech → English object name
